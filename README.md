@@ -7,18 +7,32 @@
 > כל היצורים, הסוגים, המהלכים, השמות והמפות במשחק הם **מקוריים**. אין שימוש
 > בנכסים או בשמות מוגני זכויות יוצרים.
 
+## איך מריצים
+
+**הדרך הקלה — בלי שום התקנה:** הורד את הקובץ `aurelia.html` ולחץ עליו פעמיים.
+זהו. הוא מכיל את המשחק כולו — קוד, עיצוב, גרפיקה וסאונד — בקובץ אחד שרץ ישירות
+מהדפדפן, בלי שרת, בלי טרמינל ובלי הרשאות מנהל. מתאים גם למחשב עבודה נעול.
+
 <div dir="ltr">
 
-## Running
-
-The game is plain ES modules with no build step, but browsers refuse to load
-modules over `file://`, so serve the folder:
+**For development**, the game is plain ES modules with no build step, but
+browsers refuse to load modules over `file://`, so serve the folder:
 
 ```bash
 npx http-server -p 8080 .     # or: python3 -m http.server 8080
 ```
 
 then open <http://localhost:8080>.
+
+Rebuild the standalone file after changing anything under `src/`:
+
+```bash
+node tools/build-standalone.mjs      # -> aurelia.html
+```
+
+It inlines every module (each in its own scope, so same-named module-level
+constants cannot collide) plus the CSS into one page, and fails loudly if
+`index.html` stops matching the tags it replaces.
 
 ## Controls
 
@@ -53,6 +67,11 @@ On phones and tablets an on-screen D-pad and A/B buttons appear automatically.
   אחסון כשהצוות מלא.
 - **שמירה** ל-`localStorage`, כולל מסך "המשך מסע".
 
+## פרטיות
+
+המשחק לא מבצע ולו בקשת רשת אחת — אין CDN, אין גופנים חיצוניים, אין טלמטריה.
+הכול רץ מקומית, והשמירה נשמרת ב-`localStorage` של הדפדפן שלך בלבד.
+
 ## הגרפיקה
 
 <div dir="ltr">
@@ -71,7 +90,10 @@ consistent:
 ## Layout
 
 ```
+aurelia.html          generated: the whole game in one double-clickable file
 index.html            page shell + on-screen gamepad
+tools/
+  build-standalone.mjs bundles src/ + styles.css into aurelia.html
 styles.css            page chrome, responsive scaling, touch controls
 src/
   main.js             canvas setup, game loop, scene switchboard, transitions
