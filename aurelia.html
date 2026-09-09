@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<!-- Built by tools/build-standalone.mjs — edit src/, not this file. -->
+<!-- Built by tools/build-standalone.mjs — edit the sources, not this file. -->
 <title>Aurelia — Monster Quest</title>
 <meta name="description" content="משחק הרפתקה בסגנון RPG קלאסי של אספנות מפלצות, עם גרפיקה מחודשת." />
 <style>
@@ -127,7 +127,7 @@ canvas#game{
   </div>
   <script type="module">
 /* ===== src/core/input.js ===== */
-const core_input_js = (() => {
+const __m_src_core_input_js = (() => {
 // Keyboard + on-screen gamepad, normalised into a tiny action API.
 //
 //   held('up')      -> true while the key is down
@@ -233,7 +233,7 @@ class Input {
 })();
 
 /* ===== src/core/audio.js ===== */
-const core_audio_js = (() => {
+const __m_src_core_audio_js = (() => {
 // Everything you hear is synthesised at runtime with WebAudio — no audio files,
 // no licensing questions, and the whole soundtrack costs a few hundred bytes.
 
@@ -535,7 +535,7 @@ class AudioEngine {
 })();
 
 /* ===== src/data/maps.js ===== */
-const data_maps_js = (() => {
+const __m_src_data_maps_js = (() => {
 // The world.  Maps are ASCII grids (see world/tiles.js for the legend) plus
 // warps, NPCs, encounter tables and ground items.
 
@@ -1222,7 +1222,7 @@ const START = { map: 'home', x: 5, y: 5, dir: 'down' };
 })();
 
 /* ===== src/data/species.js ===== */
-const data_species_js = (() => {
+const __m_src_data_species_js = (() => {
 // The creature roster.  Every entry carries both its battle numbers and a
 // `design` block — a compact description the procedural artist in
 // gfx/monster.js turns into a fully drawn, animated creature.
@@ -1645,7 +1645,7 @@ const STARTERS = ['emberkit', 'dewlet', 'sprigling'];
 })();
 
 /* ===== src/data/moves.js ===== */
-const data_moves_js = (() => {
+const __m_src_data_moves_js = (() => {
 // Move table.  `fx` picks the battle animation, `eff` the mechanical rider.
 //
 // cat: physical | special | status
@@ -1756,7 +1756,7 @@ const moveIds = Object.keys(MOVES);
 })();
 
 /* ===== src/core/util.js ===== */
-const core_util_js = (() => {
+const __m_src_core_util_js = (() => {
 // Small math / helper toolbox shared by every subsystem.
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -1859,10 +1859,10 @@ function makeCanvas(w, h) {
 })();
 
 /* ===== src/game/creature.js ===== */
-const game_creature_js = (() => {
-  const { getSpecies } = data_species_js;
-  const { getMove } = data_moves_js;
-  const { clamp, rangeInt, rndInt } = core_util_js;
+const __m_src_game_creature_js = (() => {
+  const { getSpecies } = __m_src_data_species_js;
+  const { getMove } = __m_src_data_moves_js;
+  const { clamp, rangeInt, rndInt } = __m_src_core_util_js;
 // Creature instances: stats, experience, status, move slots.
 // Formulas are deliberately close to the classic handheld RPG maths so the
 // pacing feels familiar.
@@ -2021,9 +2021,9 @@ function makeWild(entry) {
 })();
 
 /* ===== src/game/state.js ===== */
-const game_state_js = (() => {
-  const { START } = data_maps_js;
-  const { healFully } = game_creature_js;
+const __m_src_game_state_js = (() => {
+  const { START } = __m_src_data_maps_js;
+  const { healFully } = __m_src_game_creature_js;
 // The single mutable blob that defines a save file.
 
 
@@ -2095,7 +2095,7 @@ class GameState {
 })();
 
 /* ===== src/core/save.js ===== */
-const core_save_js = (() => {
+const __m_src_core_save_js = (() => {
 // localStorage persistence.  Saves are plain JSON — easy to inspect, easy to
 // migrate, and small enough that three slots cost nothing.
 
@@ -2147,7 +2147,7 @@ function saveSummary() {
 })();
 
 /* ===== src/gfx/ui.js ===== */
-const gfx_ui_js = (() => {
+const __m_src_gfx_ui_js = (() => {
 // Shared UI kit: glassy panels, RTL-aware text, animated bars, menu cursors.
 
 const FONT = '"Trebuchet MS", "Segoe UI", system-ui, sans-serif';
@@ -2309,8 +2309,8 @@ function vignette(ctx, w, h, strength = 0.45) {
 })();
 
 /* ===== src/gfx/actor.js ===== */
-const gfx_actor_js = (() => {
-  const { hsl, clamp } = core_util_js;
+const __m_src_gfx_actor_js = (() => {
+  const { hsl, clamp } = __m_src_core_util_js;
 // Human characters (player + NPCs) are drawn procedurally too, so a new NPC
 // costs one line of colours instead of a spritesheet.
 //
@@ -2477,9 +2477,9 @@ function drawActorPortrait(ctx, look, x, y, size) {
 })();
 
 /* ===== src/game/dialogue.js ===== */
-const game_dialogue_js = (() => {
-  const { panel, drawText, wrapText, advanceArrow, selection } = gfx_ui_js;
-  const { drawActorPortrait } = gfx_actor_js;
+const __m_src_game_dialogue_js = (() => {
+  const { panel, drawText, wrapText, advanceArrow, selection } = __m_src_gfx_ui_js;
+  const { drawActorPortrait } = __m_src_gfx_actor_js;
 // Dialogue box with typewriter text, speaker portrait and inline choices.
 
 
@@ -2622,9 +2622,9 @@ class Dialogue {
 })();
 
 /* ===== src/gfx/monster.js ===== */
-const gfx_monster_js = (() => {
-  const { hsl, clamp, makeRng, hashStr, makeCanvas } = core_util_js;
-  const { getSpecies } = data_species_js;
+const __m_src_gfx_monster_js = (() => {
+  const { hsl, clamp, makeRng, hashStr, makeCanvas } = __m_src_core_util_js;
+  const { getSpecies } = __m_src_data_species_js;
 // Procedural creature artist.
 //
 // Every creature is *drawn*, not blitted: gradients, rim light, soft shadow,
@@ -3404,7 +3404,7 @@ function drawMonsterIcon(ctx, speciesId, x, y, size, t = 0, silhouette = false) 
 })();
 
 /* ===== src/data/items.js ===== */
-const data_items_js = (() => {
+const __m_src_data_items_js = (() => {
 // Bag items.  `use` describes what happens when the item is applied to a
 // creature; balls carry a capture rate instead.
 
@@ -3479,7 +3479,7 @@ const SHOP_STOCK = ['ball', 'greatball', 'potion', 'superpotion', 'antidote',
 })();
 
 /* ===== src/data/types.js ===== */
-const data_types_js = (() => {
+const __m_src_data_types_js = (() => {
 // Elemental types. Original set — same spirit as the classics, own names/colours.
 
 const TYPES = {
@@ -3538,16 +3538,16 @@ const typeName = (t) => TYPES[t]?.name ?? t;
 })();
 
 /* ===== src/game/menus.js ===== */
-const game_menus_js = (() => {
-  const { panel, drawText, drawNum, bar, hpColors, selection, chip, wrapText, measure, fitSize } = gfx_ui_js;
-  const { drawMonster, drawMonsterIcon } = gfx_monster_js;
-  const { drawActor } = gfx_actor_js;
-  const { getSpecies, SPECIES, SPECIES_IDS } = data_species_js;
-  const { getMove } = data_moves_js;
-  const { getItem, SHOP_STOCK } = data_items_js;
-  const { typeColor, typeName } = data_types_js;
-  const { displayName, hpRatio, expToNext, STATUS } = game_creature_js;
-  const { clamp } = core_util_js;
+const __m_src_game_menus_js = (() => {
+  const { panel, drawText, drawNum, bar, hpColors, selection, chip, wrapText, measure, fitSize } = __m_src_gfx_ui_js;
+  const { drawMonster, drawMonsterIcon } = __m_src_gfx_monster_js;
+  const { drawActor } = __m_src_gfx_actor_js;
+  const { getSpecies, SPECIES, SPECIES_IDS } = __m_src_data_species_js;
+  const { getMove } = __m_src_data_moves_js;
+  const { getItem, SHOP_STOCK } = __m_src_data_items_js;
+  const { typeColor, typeName } = __m_src_data_types_js;
+  const { displayName, hpRatio, expToNext, STATUS } = __m_src_game_creature_js;
+  const { clamp } = __m_src_core_util_js;
 // Pause menu and its sub-screens: party, summary, bag, catalogue, trainer card,
 // save, plus the shop.  Everything is a stack of small screen descriptors so
 // "back" is always just a pop.
@@ -4081,14 +4081,14 @@ function formatTime(seconds) {
 })();
 
 /* ===== src/game/title.js ===== */
-const game_title_js = (() => {
-  const { panel, drawText, selection, vignette } = gfx_ui_js;
-  const { drawMonster } = gfx_monster_js;
-  const { drawActor } = gfx_actor_js;
-  const { SPECIES_IDS } = data_species_js;
-  const { saveSummary } = core_save_js;
-  const { formatTime } = game_menus_js;
-  const { makeRng } = core_util_js;
+const __m_src_game_title_js = (() => {
+  const { panel, drawText, selection, vignette } = __m_src_gfx_ui_js;
+  const { drawMonster } = __m_src_gfx_monster_js;
+  const { drawActor } = __m_src_gfx_actor_js;
+  const { SPECIES_IDS } = __m_src_data_species_js;
+  const { saveSummary } = __m_src_core_save_js;
+  const { formatTime } = __m_src_game_menus_js;
+  const { makeRng } = __m_src_core_util_js;
 // Title screen, new-game setup (name + look) and the save/continue entry point.
 
 
@@ -4299,7 +4299,7 @@ class TitleScreen {
 })();
 
 /* ===== src/world/tiles.js ===== */
-const world_tiles_js = (() => {
+const __m_src_world_tiles_js = (() => {
 // Tile vocabulary.  Maps are authored as plain strings, one char per tile,
 // which keeps the map files readable and diff-friendly.
 
@@ -4355,10 +4355,10 @@ function tileInfo(ch) { return TILES[ch] || TILES[' ']; }
 })();
 
 /* ===== src/world/tilemap.js ===== */
-const world_tilemap_js = (() => {
-  const { MAPS } = data_maps_js;
-  const { TILE, tileInfo } = world_tiles_js;
-  const { pickWeighted } = core_util_js;
+const __m_src_world_tilemap_js = (() => {
+  const { MAPS } = __m_src_data_maps_js;
+  const { TILE, tileInfo } = __m_src_world_tiles_js;
+  const { pickWeighted } = __m_src_core_util_js;
 // Runtime view over a map definition: collision, warps, encounter lookup and
 // the y-sorted draw list the overworld renderer consumes.
 
@@ -4412,9 +4412,9 @@ class TileMap {
 })();
 
 /* ===== src/gfx/terrain.js ===== */
-const gfx_terrain_js = (() => {
-  const { TILE } = world_tiles_js;
-  const { makeCanvas, makeRng, valueNoise2D, fbm, hsl, clamp } = core_util_js;
+const __m_src_gfx_terrain_js = (() => {
+  const { TILE } = __m_src_world_tiles_js;
+  const { makeCanvas, makeRng, valueNoise2D, fbm, hsl, clamp } = __m_src_core_util_js;
 // Terrain + decoration art, generated once at boot into offscreen canvases.
 //
 // Ground materials get several random variants so large fields never look
@@ -4956,8 +4956,8 @@ function decoSprite(name, vx, vy) {
 })();
 
 /* ===== src/gfx/particles.js ===== */
-const gfx_particles_js = (() => {
-  const { clamp } = core_util_js;
+const __m_src_gfx_particles_js = (() => {
+  const { clamp } = __m_src_core_util_js;
 // A tiny pooled particle system shared by the overworld and battle scenes.
 
 
@@ -5061,18 +5061,18 @@ class Particles {
 })();
 
 /* ===== src/world/overworld.js ===== */
-const world_overworld_js = (() => {
-  const { TileMap } = world_tilemap_js;
-  const { TILE, tileInfo } = world_tiles_js;
-  const { buildTerrainArt, groundTile, decoSprite, MATERIALS, FLIPPABLE, ART } = gfx_terrain_js;
-  const { drawActor } = gfx_actor_js;
-  const { Particles } = gfx_particles_js;
-  const { panel, drawText, vignette, measure } = gfx_ui_js;
-  const { getItem } = data_items_js;
-  const { getSpecies, STARTERS } = data_species_js;
-  const { typeName } = data_types_js;
-  const { createCreature, makeWild } = game_creature_js;
-  const { clamp, lerp, chance, hsl, easeOutCubic } = core_util_js;
+const __m_src_world_overworld_js = (() => {
+  const { TileMap } = __m_src_world_tilemap_js;
+  const { TILE, tileInfo } = __m_src_world_tiles_js;
+  const { buildTerrainArt, groundTile, decoSprite, MATERIALS, FLIPPABLE, ART } = __m_src_gfx_terrain_js;
+  const { drawActor } = __m_src_gfx_actor_js;
+  const { Particles } = __m_src_gfx_particles_js;
+  const { panel, drawText, vignette, measure } = __m_src_gfx_ui_js;
+  const { getItem } = __m_src_data_items_js;
+  const { getSpecies, STARTERS } = __m_src_data_species_js;
+  const { typeName } = __m_src_data_types_js;
+  const { createCreature, makeWild } = __m_src_game_creature_js;
+  const { clamp, lerp, chance, hsl, easeOutCubic } = __m_src_core_util_js;
 // The overworld: grid movement with smooth interpolation, a y-sorted renderer,
 // NPC behaviour and everything that can interrupt exploration (encounters,
 // warps, trainers who spot you, ledges, pickups).
@@ -5987,13 +5987,13 @@ class Overworld {
 })();
 
 /* ===== src/battle/engine.js ===== */
-const battle_engine_js = (() => {
-  const { getMove, STRUGGLE } = data_moves_js;
-  const { getSpecies } = data_species_js;
-  const { typeMultiplier, effectivenessLabel } = data_types_js;
-  const { getItem } = data_items_js;
-  const { displayName, expAward, gainExp } = game_creature_js;
-  const { clamp, chance, rangeInt, rndInt } = core_util_js;
+const __m_src_battle_engine_js = (() => {
+  const { getMove, STRUGGLE } = __m_src_data_moves_js;
+  const { getSpecies } = __m_src_data_species_js;
+  const { typeMultiplier, effectivenessLabel } = __m_src_data_types_js;
+  const { getItem } = __m_src_data_items_js;
+  const { displayName, expAward, gainExp } = __m_src_game_creature_js;
+  const { clamp, chance, rangeInt, rndInt } = __m_src_core_util_js;
 // Turn resolution.  The engine is pure logic: it mutates creatures and emits a
 // flat list of events that the battle scene plays back with animation and
 // timing.  Keeping the two apart makes the rules easy to read and to test.
@@ -6579,9 +6579,9 @@ class Battle {
 })();
 
 /* ===== src/battle/fx.js ===== */
-const battle_fx_js = (() => {
-  const { typeColor } = data_types_js;
-  const { hsl, lerp, clamp } = core_util_js;
+const __m_src_battle_fx_js = (() => {
+  const { typeColor } = __m_src_data_types_js;
+  const { hsl, lerp, clamp } = __m_src_core_util_js;
 // Move animations.  Each entry returns a short-lived effect object with its own
 // update/draw, plus particles emitted into the scene's shared system.
 
@@ -7083,18 +7083,18 @@ function createFx(name, from, to, P, type = 'neutral') {
 })();
 
 /* ===== src/battle/scene.js ===== */
-const battle_scene_js = (() => {
-  const { Battle } = battle_engine_js;
-  const { createFx } = battle_fx_js;
-  const { Particles } = gfx_particles_js;
-  const { drawMonster, drawMonsterIcon } = gfx_monster_js;
-  const { panel, drawText, drawNum, wrapText, bar, hpColors, selection, chip, advanceArrow, vignette, fitSize } = gfx_ui_js;
-  const { getSpecies } = data_species_js;
-  const { getMove, STRUGGLE } = data_moves_js;
-  const { getItem } = data_items_js;
-  const { typeColor, typeName, typeMultiplier } = data_types_js;
-  const { displayName, hpRatio, expToNext, STATUS, evolveInto, makeMoveSlot } = game_creature_js;
-  const { clamp, lerp, easeOutCubic, easeOutBack, hsl } = core_util_js;
+const __m_src_battle_scene_js = (() => {
+  const { Battle } = __m_src_battle_engine_js;
+  const { createFx } = __m_src_battle_fx_js;
+  const { Particles } = __m_src_gfx_particles_js;
+  const { drawMonster, drawMonsterIcon } = __m_src_gfx_monster_js;
+  const { panel, drawText, drawNum, wrapText, bar, hpColors, selection, chip, advanceArrow, vignette, fitSize } = __m_src_gfx_ui_js;
+  const { getSpecies } = __m_src_data_species_js;
+  const { getMove, STRUGGLE } = __m_src_data_moves_js;
+  const { getItem } = __m_src_data_items_js;
+  const { typeColor, typeName, typeMultiplier } = __m_src_data_types_js;
+  const { displayName, hpRatio, expToNext, STATUS, evolveInto, makeMoveSlot } = __m_src_game_creature_js;
+  const { clamp, lerp, easeOutCubic, easeOutBack, hsl } = __m_src_core_util_js;
 // Battle presentation: background, combatants, HUD, menus and the playback of
 // the engine's event list.
 
@@ -8063,16 +8063,16 @@ class BattleScene {
 
 /* ===== src/main.js ===== */
 (() => {
-  const { Input } = core_input_js;
-  const { AudioEngine } = core_audio_js;
-  const { GameState, newGame } = game_state_js;
-  const { saveGame, loadGame } = core_save_js;
-  const { Dialogue } = game_dialogue_js;
-  const { MenuSystem } = game_menus_js;
-  const { TitleScreen } = game_title_js;
-  const { Overworld } = world_overworld_js;
-  const { BattleScene } = battle_scene_js;
-  const { clamp, hsl } = core_util_js;
+  const { Input } = __m_src_core_input_js;
+  const { AudioEngine } = __m_src_core_audio_js;
+  const { GameState, newGame } = __m_src_game_state_js;
+  const { saveGame, loadGame } = __m_src_core_save_js;
+  const { Dialogue } = __m_src_game_dialogue_js;
+  const { MenuSystem } = __m_src_game_menus_js;
+  const { TitleScreen } = __m_src_game_title_js;
+  const { Overworld } = __m_src_world_overworld_js;
+  const { BattleScene } = __m_src_battle_scene_js;
+  const { clamp, hsl } = __m_src_core_util_js;
 // Entry point: canvas setup, the fixed-step loop and the scene switchboard.
 
 

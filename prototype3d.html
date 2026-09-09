@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Aurelia 3D — אב טיפוס</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #0a1220; overflow: hidden;
+               font-family: "Trebuchet MS", system-ui, sans-serif; }
+  #wrap { position: absolute; inset: 0; }
+  canvas { position: absolute; inset: 0; display: block; }
+  #overlay { pointer-events: none; }
+  #err { position: absolute; inset: 0; display: none; place-items: center;
+         color: #ffb4b4; background: #12080c; padding: 40px; text-align: center;
+         font-size: 18px; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="gl"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="err"></div>
+  </div>
+<script type="module">
+import { World3D } from './src3d/main3d.js';
+
+const err = document.getElementById('err');
+try {
+  const world = new World3D(document.getElementById('gl'), document.getElementById('overlay'),
+    new URLSearchParams(location.search).get('map') || 'route1');
+  const fit = () => world.resize(innerWidth, innerHeight);
+  addEventListener('resize', fit);
+  fit();
+  window.__world = world;
+  const show = new URLSearchParams(location.search).get('showcase');
+  if (show) world.showcase(show.split(','));
+
+  let last = performance.now();
+  const loop = () => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    world.update(dt);
+    world.render();
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+} catch (e) {
+  console.error(e);
+  err.style.display = 'grid';
+  err.textContent = 'שגיאה: ' + e.message;
+}
+</script>
+</body>
+</html>

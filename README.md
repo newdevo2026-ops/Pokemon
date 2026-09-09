@@ -72,6 +72,24 @@ On phones and tablets an on-screen D-pad and A/B buttons appear automatically.
 המשחק לא מבצע ולו בקשת רשת אחת — אין CDN, אין גופנים חיצוניים, אין טלמטריה.
 הכול רץ מקומית, והשמירה נשמרת ב-`localStorage` של הדפדפן שלך בלבד.
 
+## גרסת 3D (בעבודה)
+
+`aurelia3d.html` הוא אב טיפוס של מנוע תלת־ממד בסגנון RuneScape: שטח low-poly
+מוצל שטוח, מצלמה מסתובבת, ויצורים שמסתובבים בעולם הפתוח — אפשר להתקרב אליהם
+ולפתוח קרב, במקום מפגשים אקראיים. המנוע נכתב ישירות מול WebGL 2 בלי שום ספרייה
+חיצונית, כדי לשמור על התכונה שהמשחק רץ מקובץ אחד בלי התקנות.
+
+היצורים והשטח נבנים מאותם נתונים בדיוק כמו בגרסה הדו־ממדית: אותו `design` בכל
+יצור, ואותן מפות ASCII. בנייה:
+
+<div dir="ltr">
+
+```bash
+node tools/build-standalone.mjs src3d/main3d.js prototype3d.html aurelia3d.html
+```
+
+</div>
+
 ## הגרפיקה
 
 <div dir="ltr">

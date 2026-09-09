@@ -1,0 +1,3286 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- Built by tools/build-standalone.mjs — edit the sources, not this file. -->
+<title>Aurelia 3D — אב טיפוס</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #0a1220; overflow: hidden;
+               font-family: "Trebuchet MS", system-ui, sans-serif; }
+  #wrap { position: absolute; inset: 0; }
+  canvas { position: absolute; inset: 0; display: block; }
+  #overlay { pointer-events: none; }
+  #err { position: absolute; inset: 0; display: none; place-items: center;
+         color: #ffb4b4; background: #12080c; padding: 40px; text-align: center;
+         font-size: 18px; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="gl"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="err"></div>
+  </div>
+<script type="module">
+/* ===== src3d/core/mat4.js ===== */
+const __m_src3d_core_mat4_js = (() => {
+// Minimal column-major 4x4 / vec3 maths. Just what the renderer needs.
+
+const mat4 = {
+  create: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+
+  identity(o) {
+    o.set([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+    return o;
+  },
+
+  multiply(o, a, b) {
+    const a00=a[0],a01=a[1],a02=a[2],a03=a[3], a10=a[4],a11=a[5],a12=a[6],a13=a[7],
+          a20=a[8],a21=a[9],a22=a[10],a23=a[11], a30=a[12],a31=a[13],a32=a[14],a33=a[15];
+    for (let i = 0; i < 4; i++) {
+      const b0=b[i*4], b1=b[i*4+1], b2=b[i*4+2], b3=b[i*4+3];
+      o[i*4]   = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+      o[i*4+1] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+      o[i*4+2] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+      o[i*4+3] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+    }
+    return o;
+  },
+
+  perspective(o, fovy, aspect, near, far) {
+    const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    o.set([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]);
+    return o;
+  },
+
+  lookAt(o, eye, center, up) {
+    let z0=eye[0]-center[0], z1=eye[1]-center[1], z2=eye[2]-center[2];
+    let len = Math.hypot(z0,z1,z2) || 1; z0/=len; z1/=len; z2/=len;
+    let x0=up[1]*z2-up[2]*z1, x1=up[2]*z0-up[0]*z2, x2=up[0]*z1-up[1]*z0;
+    len = Math.hypot(x0,x1,x2) || 1; x0/=len; x1/=len; x2/=len;
+    const y0=z1*x2-z2*x1, y1=z2*x0-z0*x2, y2=z0*x1-z1*x0;
+    o.set([x0,y0,z0,0, x1,y1,z1,0, x2,y2,z2,0,
+      -(x0*eye[0]+x1*eye[1]+x2*eye[2]),
+      -(y0*eye[0]+y1*eye[1]+y2*eye[2]),
+      -(z0*eye[0]+z1*eye[1]+z2*eye[2]), 1]);
+    return o;
+  },
+
+  fromTRS(o, tx, ty, tz, ry, sx, sy, sz) {
+    const c = Math.cos(ry), s = Math.sin(ry);
+    o.set([c*sx,0,-s*sx,0, 0,sy,0,0, s*sz,0,c*sz,0, tx,ty,tz,1]);
+    return o;
+  },
+
+  translate(o, x, y, z) {
+    o[12] += o[0]*x + o[4]*y + o[8]*z;
+    o[13] += o[1]*x + o[5]*y + o[9]*z;
+    o[14] += o[2]*x + o[6]*y + o[10]*z;
+    return o;
+  },
+};
+
+/** Transform stack used while assembling a mesh from parts. */
+class Stack {
+  constructor() {
+    this.m = mat4.create();
+    this.saved = [];
+    this.tmp = mat4.create();
+  }
+  push() { this.saved.push(new Float32Array(this.m)); return this; }
+  pop() { this.m = this.saved.pop(); return this; }
+  reset() { mat4.identity(this.m); this.saved.length = 0; return this; }
+
+  translate(x, y, z) {
+    mat4.translate(this.m, x, y, z);
+    return this;
+  }
+  scale(x, y = x, z = x) {
+    const t = this.tmp;
+    t.set([x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1]);
+    mat4.multiply(this.m, this.m, t);
+    return this;
+  }
+  rotateX(a) {
+    const c = Math.cos(a), s = Math.sin(a), t = this.tmp;
+    t.set([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+    mat4.multiply(this.m, this.m, t);
+    return this;
+  }
+  rotateY(a) {
+    const c = Math.cos(a), s = Math.sin(a), t = this.tmp;
+    t.set([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+    mat4.multiply(this.m, this.m, t);
+    return this;
+  }
+  rotateZ(a) {
+    const c = Math.cos(a), s = Math.sin(a), t = this.tmp;
+    t.set([c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]);
+    mat4.multiply(this.m, this.m, t);
+    return this;
+  }
+  /** Apply the current matrix to a point. */
+  apply(out, x, y, z) {
+    const m = this.m;
+    out[0] = m[0]*x + m[4]*y + m[8]*z + m[12];
+    out[1] = m[1]*x + m[5]*y + m[9]*z + m[13];
+    out[2] = m[2]*x + m[6]*y + m[10]*z + m[14];
+    return out;
+  }
+}
+  return { mat4, Stack };
+})();
+
+/* ===== src3d/core/renderer.js ===== */
+const __m_src3d_core_renderer_js = (() => {
+  const { mat4 } = __m_src3d_core_mat4_js;
+// WebGL2 renderer: flat-shaded, vertex-coloured, one directional light plus
+// hemisphere ambient and distance fog.  No textures anywhere — the whole look
+// comes from geometry and colour, which is what keeps the art style coherent
+// and the build a single dependency-free file.
+
+
+
+const VERT = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+layout(location=2) in vec3 aColor;
+uniform mat4 uViewProj;
+uniform mat4 uModel;
+flat out vec3 vNormal;
+flat out vec3 vColor;
+out float vDepth;
+out vec3 vWorld;
+void main() {
+  vec4 world = uModel * vec4(aPos, 1.0);
+  gl_Position = uViewProj * world;
+  // Uniform scale only, so the model matrix doubles as the normal matrix.
+  vNormal = normalize(mat3(uModel) * aNormal);
+  vColor = aColor;
+  vWorld = world.xyz;
+  vDepth = gl_Position.w;
+}`;
+
+const FRAG = `#version 300 es
+precision highp float;
+flat in vec3 vNormal;
+flat in vec3 vColor;
+in float vDepth;
+in vec3 vWorld;
+uniform vec3 uLightDir;
+uniform vec3 uSkyColor;
+uniform vec3 uGroundColor;
+uniform vec3 uFogColor;
+uniform vec2 uFogRange;
+uniform vec3 uTint;
+uniform float uAlpha;
+uniform float uEmissive;
+out vec4 fragColor;
+void main() {
+  vec3 n = normalize(vNormal);
+  float lambert = max(dot(n, uLightDir), 0.0);
+  // Hemisphere ambient: sky above, bounced ground light below.
+  float hemi = n.y * 0.5 + 0.5;
+  vec3 ambient = mix(uGroundColor, uSkyColor, hemi);
+  vec3 lit = vColor * uTint * (ambient + lambert * 0.85);
+  lit = mix(lit, vColor * uTint, uEmissive);
+  float fog = clamp((vDepth - uFogRange.x) / (uFogRange.y - uFogRange.x), 0.0, 1.0);
+  fragColor = vec4(mix(lit, uFogColor, fog * 0.9), uAlpha);
+}`;
+
+function compile(gl, type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    throw new Error('shader: ' + gl.getShaderInfoLog(s));
+  }
+  return s;
+}
+
+class Mesh {
+  constructor(gl, data) {
+    this.gl = gl;
+    this.count = data.count;
+    this.vao = gl.createVertexArray();
+    gl.bindVertexArray(this.vao);
+    const attach = (loc, arr) => {
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+      return buf;
+    };
+    this.bufs = [attach(0, data.pos), attach(1, data.norm), attach(2, data.col)];
+    gl.bindVertexArray(null);
+  }
+  dispose() {
+    this.gl.deleteVertexArray(this.vao);
+    for (const b of this.bufs) this.gl.deleteBuffer(b);
+  }
+}
+
+class Renderer {
+  constructor(canvas) {
+    const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
+    if (!gl) throw new Error('WebGL 2 is not available in this browser');
+    this.gl = gl;
+    this.canvas = canvas;
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VERT));
+    gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FRAG));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      throw new Error('link: ' + gl.getProgramInfoLog(prog));
+    }
+    this.prog = prog;
+    this.u = {};
+    for (const n of ['uViewProj','uModel','uLightDir','uSkyColor','uGroundColor',
+                     'uFogColor','uFogRange','uTint','uAlpha','uEmissive']) {
+      this.u[n] = gl.getUniformLocation(prog, n);
+    }
+
+    this.proj = mat4.create();
+    this.view = mat4.create();
+    this.viewProj = mat4.create();
+    this.model = mat4.create();
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    this.sky = [0.42, 0.50, 0.62];
+    this.ground = [0.20, 0.20, 0.16];
+    this.fog = [0.62, 0.78, 0.92];
+    this.fogRange = [40, 130];
+    this.lightDir = this.normalize([0.45, 0.82, 0.36]);
+  }
+
+  normalize(v) {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0]/l, v[1]/l, v[2]/l];
+  }
+
+  mesh(data) { return new Mesh(this.gl, data); }
+
+  resize(w, h, dpr = 1) {
+    this.canvas.width = Math.floor(w * dpr);
+    this.canvas.height = Math.floor(h * dpr);
+    this.aspect = w / h;
+  }
+
+  beginFrame(camera) {
+    const gl = this.gl;
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(this.fog[0], this.fog[1], this.fog[2], 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    mat4.perspective(this.proj, camera.fov, this.aspect, 0.5, 400);
+    mat4.lookAt(this.view, camera.eye, camera.target, [0, 1, 0]);
+    mat4.multiply(this.viewProj, this.proj, this.view);
+
+    gl.useProgram(this.prog);
+    gl.uniformMatrix4fv(this.u.uViewProj, false, this.viewProj);
+    gl.uniform3fv(this.u.uLightDir, this.lightDir);
+    gl.uniform3fv(this.u.uSkyColor, this.sky);
+    gl.uniform3fv(this.u.uGroundColor, this.ground);
+    gl.uniform3fv(this.u.uFogColor, this.fog);
+    gl.uniform2fv(this.u.uFogRange, this.fogRange);
+  }
+
+  /** @param o {x,y,z,rotY,scale,tint,alpha,emissive} */
+  draw(mesh, o = {}) {
+    const gl = this.gl;
+    const s = o.scale ?? 1;
+    mat4.fromTRS(this.model, o.x ?? 0, o.y ?? 0, o.z ?? 0, o.rotY ?? 0, s, o.scaleY ?? s, s);
+    gl.uniformMatrix4fv(this.u.uModel, false, this.model);
+    gl.uniform3fv(this.u.uTint, o.tint ?? [1, 1, 1]);
+    gl.uniform1f(this.u.uAlpha, o.alpha ?? 1);
+    gl.uniform1f(this.u.uEmissive, o.emissive ?? 0);
+    gl.bindVertexArray(mesh.vao);
+    gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
+  }
+
+  /** Draw with a fully composed model matrix — used for animated limbs. */
+  drawMatrix(mesh, model, o = {}) {
+    const gl = this.gl;
+    gl.uniformMatrix4fv(this.u.uModel, false, model);
+    gl.uniform3fv(this.u.uTint, o.tint ?? [1, 1, 1]);
+    gl.uniform1f(this.u.uAlpha, o.alpha ?? 1);
+    gl.uniform1f(this.u.uEmissive, o.emissive ?? 0);
+    gl.bindVertexArray(mesh.vao);
+    gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
+  }
+
+  depthWrite(on) { this.gl.depthMask(on); }
+}
+
+/** Orbit camera locked to a target, the way a fixed-pitch RPG camera behaves. */
+class OrbitCamera {
+  constructor() {
+    this.yaw = 0.6;
+    this.pitch = 0.66;
+    this.distance = 38;
+    this.height = 1.6;
+    this.fov = 0.72;
+    this.target = [0, 0, 0];
+    this.eye = [0, 0, 0];
+    this.follow = [0, 0, 0];
+  }
+  update(tx, ty, tz, dt) {
+    const k = 1 - Math.pow(0.0001, dt);
+    this.follow[0] += (tx - this.follow[0]) * k;
+    this.follow[1] += (ty - this.follow[1]) * k;
+    this.follow[2] += (tz - this.follow[2]) * k;
+    this.target[0] = this.follow[0];
+    this.target[1] = this.follow[1] + this.height;
+    this.target[2] = this.follow[2];
+    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    this.eye[0] = this.target[0] + Math.sin(this.yaw) * cp * this.distance;
+    this.eye[1] = this.target[1] + sp * this.distance;
+    this.eye[2] = this.target[2] + Math.cos(this.yaw) * cp * this.distance;
+  }
+  /** Camera-relative forward/right on the ground plane, for movement input. */
+  basis() {
+    const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
+    return { fx: -s, fz: -c, rx: c, rz: -s };
+  }
+}
+  return { Mesh, Renderer, OrbitCamera };
+})();
+
+/* ===== src3d/core/meshbuilder.js ===== */
+const __m_src3d_core_meshbuilder_js = (() => {
+  const { Stack } = __m_src3d_core_mat4_js;
+// Accumulates flat-shaded, vertex-coloured geometry.
+//
+// Everything in the game is built from a handful of chunky primitives pushed
+// through a transform stack — the same approach that gives early-2000s 3D RPGs
+// their readable, faceted look.  No textures, no smooth normals: each triangle
+// carries one normal and one colour, so silhouettes stay crisp.
+
+
+
+const P = [0, 0, 0], Q = [0, 0, 0], R = [0, 0, 0];
+
+class MeshBuilder {
+  constructor() {
+    this.pos = [];
+    this.norm = [];
+    this.col = [];
+    this.stack = new Stack();
+    this.tint = [1, 1, 1];
+  }
+
+  get vertexCount() { return this.pos.length / 3; }
+
+  // ---- transform stack passthrough ----
+  push() { this.stack.push(); return this; }
+  pop() { this.stack.pop(); return this; }
+  translate(x, y, z) { this.stack.translate(x, y, z); return this; }
+  scale(x, y, z) { this.stack.scale(x, y, z); return this; }
+  rotateX(a) { this.stack.rotateX(a); return this; }
+  rotateY(a) { this.stack.rotateY(a); return this; }
+  rotateZ(a) { this.stack.rotateZ(a); return this; }
+
+  /** One flat-shaded triangle in local space; the normal is derived per face. */
+  tri(ax, ay, az, bx, by, bz, cx, cy, cz, color) {
+    const s = this.stack;
+    s.apply(P, ax, ay, az);
+    s.apply(Q, bx, by, bz);
+    s.apply(R, cx, cy, cz);
+    const ux = Q[0]-P[0], uy = Q[1]-P[1], uz = Q[2]-P[2];
+    const vx = R[0]-P[0], vy = R[1]-P[1], vz = R[2]-P[2];
+    let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    const [tr, tg, tb] = this.tint;
+    const r = color[0]*tr, g = color[1]*tg, b = color[2]*tb;
+    this.pos.push(P[0],P[1],P[2], Q[0],Q[1],Q[2], R[0],R[1],R[2]);
+    this.norm.push(nx,ny,nz, nx,ny,nz, nx,ny,nz);
+    this.col.push(r,g,b, r,g,b, r,g,b);
+    return this;
+  }
+
+  quad(a, b, c, d, color) {
+    this.tri(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2], color);
+    this.tri(a[0],a[1],a[2], c[0],c[1],c[2], d[0],d[1],d[2], color);
+    return this;
+  }
+
+  /** Axis-aligned box centred on the origin of the current transform. */
+  box(w, h, d, color, topColor) {
+    const x = w/2, y = h/2, z = d/2;
+    const top = topColor || color;
+    // +y / -y
+    this.quad([-x,y,-z],[-x,y,z],[x,y,z],[x,y,-z], top);
+    this.quad([-x,-y,z],[-x,-y,-z],[x,-y,-z],[x,-y,z], color);
+    // +z / -z
+    this.quad([-x,-y,z],[x,-y,z],[x,y,z],[-x,y,z], color);
+    this.quad([x,-y,-z],[-x,-y,-z],[-x,y,-z],[x,y,-z], color);
+    // +x / -x
+    this.quad([x,-y,z],[x,-y,-z],[x,y,-z],[x,y,z], color);
+    this.quad([-x,-y,-z],[-x,-y,z],[-x,y,z],[-x,y,-z], color);
+    return this;
+  }
+
+  /** Low-poly UV sphere; `seg`/`rings` stay small on purpose. */
+  sphere(r, color, seg = 8, rings = 6, squashY = 1) {
+    for (let i = 0; i < rings; i++) {
+      const p0 = Math.PI * i / rings, p1 = Math.PI * (i + 1) / rings;
+      const y0 = Math.cos(p0) * r * squashY, y1 = Math.cos(p1) * r * squashY;
+      const r0 = Math.sin(p0) * r, r1 = Math.sin(p1) * r;
+      for (let j = 0; j < seg; j++) {
+        const t0 = 2 * Math.PI * j / seg, t1 = 2 * Math.PI * (j + 1) / seg;
+        const a = [Math.cos(t0)*r0, y0, Math.sin(t0)*r0];
+        const b = [Math.cos(t1)*r0, y0, Math.sin(t1)*r0];
+        const c = [Math.cos(t1)*r1, y1, Math.sin(t1)*r1];
+        const d = [Math.cos(t0)*r1, y1, Math.sin(t0)*r1];
+        if (i === 0) this.tri(a[0],a[1],a[2], c[0],c[1],c[2], d[0],d[1],d[2], color);
+        else if (i === rings - 1) this.tri(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2], color);
+        else this.quad(a, b, c, d, color);
+      }
+    }
+    return this;
+  }
+
+  /** Tapered cylinder along +y, base at y=0. Radius 0 at one end gives a cone. */
+  taper(r0, r1, h, color, seg = 8, cap = true) {
+    for (let j = 0; j < seg; j++) {
+      const t0 = 2 * Math.PI * j / seg, t1 = 2 * Math.PI * (j + 1) / seg;
+      const a = [Math.cos(t0)*r0, 0, Math.sin(t0)*r0];
+      const b = [Math.cos(t1)*r0, 0, Math.sin(t1)*r0];
+      const c = [Math.cos(t1)*r1, h, Math.sin(t1)*r1];
+      const d = [Math.cos(t0)*r1, h, Math.sin(t0)*r1];
+      if (r1 < 1e-4) this.tri(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2], color);
+      else if (r0 < 1e-4) this.tri(a[0],a[1],a[2], c[0],c[1],c[2], d[0],d[1],d[2], color);
+      else this.quad(a, b, c, d, color);
+      if (cap) {
+        if (r0 > 1e-4) this.tri(0,0,0, a[0],a[1],a[2], b[0],b[1],b[2], color);
+        if (r1 > 1e-4) this.tri(0,h,0, c[0],c[1],c[2], d[0],d[1],d[2], color);
+      }
+    }
+    return this;
+  }
+
+  /** Limb between two points in the current space. */
+  limb(x0, y0, z0, x1, y1, z1, r0, r1, color, seg = 6) {
+    const dx = x1-x0, dy = y1-y0, dz = z1-z0;
+    const len = Math.hypot(dx, dy, dz) || 1e-4;
+    const yaw = Math.atan2(dx, dz);
+    const pitch = Math.acos(Math.max(-1, Math.min(1, dy / len)));
+    this.push();
+    this.translate(x0, y0, z0).rotateY(yaw).rotateX(pitch);
+    this.taper(r0, r1, len, color, seg);
+    this.pop();
+    return this;
+  }
+
+  /** Flat double-sided blade — wings, fins, leaves. */
+  blade(pts, color, thickness = 0.02) {
+    for (const s of [thickness / 2, -thickness / 2]) {
+      for (let i = 1; i < pts.length - 1; i++) {
+        const a = pts[0], b = pts[i], c = pts[i + 1];
+        if (s > 0) this.tri(a[0],a[1],s, b[0],b[1],s, c[0],c[1],s, color);
+        else this.tri(a[0],a[1],s, c[0],c[1],s, b[0],b[1],s, color);
+      }
+    }
+    return this;
+  }
+
+  merge(other) {
+    this.pos.push(...other.pos);
+    this.norm.push(...other.norm);
+    this.col.push(...other.col);
+    return this;
+  }
+
+  data() {
+    return {
+      pos: new Float32Array(this.pos),
+      norm: new Float32Array(this.norm),
+      col: new Float32Array(this.col),
+      count: this.pos.length / 3,
+    };
+  }
+}
+  return { MeshBuilder };
+})();
+
+/* ===== src/data/species.js ===== */
+const __m_src_data_species_js = (() => {
+// The creature roster.  Every entry carries both its battle numbers and a
+// `design` block — a compact description the procedural artist in
+// gfx/monster.js turns into a fully drawn, animated creature.
+
+const S = (o) => o;
+
+const SPECIES = {
+  // ============================ EMBER LINE =================================
+  emberkit: S({
+    dex: 1, name: 'אמברקיט', en: 'Emberkit', types: ['ember'],
+    base: { hp: 45, atk: 60, def: 42, spa: 62, spd: 46, spe: 65 },
+    growth: 'medium', catchRate: 45, baseExp: 62, cry: 1,
+    flavor: 'גור להבה סקרן. הזנב שלו מתלקח כשהוא מתרגש.',
+    evolve: { to: 'blazehound', level: 16 },
+    learn: [[1, 'scratch'], [1, 'growl'], [4, 'emberspit'], [9, 'quickjab'],
+            [13, 'flamefang'], [18, 'firewheel'], [24, 'battlecry'], [31, 'infernobeam']],
+    design: { body: 'quad', pal: [[18, 88, 56], [36, 92, 62], [200, 20, 96]], ears: 'pointy',
+              tail: 'flame', eyes: 'sharp', markings: 'stripes', size: 0.78, aura: 'fire' },
+  }),
+  blazehound: S({
+    dex: 2, name: 'בלייזהאונד', en: 'Blazehound', types: ['ember'],
+    base: { hp: 62, atk: 82, def: 58, spa: 84, spd: 62, spe: 88 },
+    growth: 'medium', catchRate: 22, baseExp: 142, cry: 2,
+    flavor: 'רץ במהירות שמותירה שובל גיצים באוויר.',
+    evolve: { to: 'pyroclast', level: 34 },
+    learn: [[1, 'scratch'], [1, 'emberspit'], [13, 'flamefang'], [19, 'firewheel'],
+            [26, 'battlecry'], [33, 'infernobeam'], [41, 'sunflare']],
+    design: { body: 'quad', pal: [[12, 90, 50], [40, 95, 60], [220, 25, 94]], ears: 'pointy',
+              tail: 'flame', eyes: 'sharp', markings: 'stripes', size: 1.0, aura: 'fire' },
+  }),
+  pyroclast: S({
+    dex: 3, name: 'פירוקלסט', en: 'Pyroclast', types: ['ember', 'stone'],
+    base: { hp: 84, atk: 104, def: 82, spa: 106, spd: 80, spe: 96 },
+    growth: 'medium', catchRate: 12, baseExp: 240, cry: 3,
+    flavor: 'רעמתו היא סדק אל תוך לב הר געש.',
+    evolve: null,
+    learn: [[1, 'flamefang'], [1, 'firewheel'], [26, 'battlecry'], [35, 'infernobeam'],
+            [43, 'boulderdrop'], [52, 'sunflare'], [60, 'hypersurge']],
+    design: { body: 'quad', pal: [[8, 88, 44], [42, 98, 58], [24, 30, 22]], ears: 'horns',
+              tail: 'flame', eyes: 'glow', markings: 'plates', size: 1.25, aura: 'fire' },
+  }),
+
+  // ============================ AQUA LINE ==================================
+  dewlet: S({
+    dex: 4, name: 'דיולט', en: 'Dewlet', types: ['aqua'],
+    base: { hp: 50, atk: 50, def: 60, spa: 62, spd: 62, spe: 46 },
+    growth: 'medium', catchRate: 45, baseExp: 63, cry: 4,
+    flavor: 'נושא טיפת מים מושלמת על ראשו ומסרב לשפוך אותה.',
+    evolve: { to: 'marisel', level: 16 },
+    learn: [[1, 'tackle'], [1, 'harden'], [4, 'bubblejet'], [10, 'mistveil'],
+            [15, 'aquapulse'], [21, 'frostshard'], [27, 'tidalcrash'], [34, 'hydrolance']],
+    design: { body: 'aquatic', pal: [[205, 78, 58], [190, 70, 78], [50, 90, 70]], ears: 'fins',
+              tail: 'fin', eyes: 'round', markings: 'swirl', size: 0.76, aura: 'bubble' },
+  }),
+  marisel: S({
+    dex: 5, name: 'מריסל', en: 'Marisel', types: ['aqua'],
+    base: { hp: 68, atk: 66, def: 82, spa: 84, spd: 84, spe: 60 },
+    growth: 'medium', catchRate: 22, baseExp: 143, cry: 5,
+    flavor: 'סנפיריה יוצרים מערבולות שמושכות טרף מרחוק.',
+    evolve: { to: 'tsunareign', level: 34 },
+    learn: [[1, 'bubblejet'], [1, 'harden'], [15, 'aquapulse'], [22, 'frostshard'],
+            [29, 'tidalcrash'], [37, 'hydrolance'], [45, 'glacierbeam']],
+    design: { body: 'aquatic', pal: [[208, 80, 50], [186, 72, 72], [45, 92, 66]], ears: 'fins',
+              tail: 'fin', eyes: 'round', markings: 'swirl', size: 1.0, aura: 'bubble' },
+  }),
+  tsunareign: S({
+    dex: 6, name: 'צונאריין', en: 'Tsunareign', types: ['aqua', 'frost'],
+    base: { hp: 90, atk: 84, def: 100, spa: 108, spd: 104, spe: 74 },
+    growth: 'medium', catchRate: 12, baseExp: 241, cry: 6,
+    flavor: 'הים נענה לתנועת ראשה. נדיר לפגוש אותה קרוב לחוף.',
+    evolve: null,
+    learn: [[1, 'aquapulse'], [1, 'mistveil'], [29, 'tidalcrash'], [38, 'hydrolance'],
+            [47, 'glacierbeam'], [56, 'hypersurge']],
+    design: { body: 'serpent', pal: [[210, 82, 44], [188, 76, 74], [40, 94, 68]], ears: 'fins',
+              tail: 'fin', eyes: 'glow', markings: 'swirl', size: 1.28, aura: 'bubble' },
+  }),
+
+  // =========================== VERDANT LINE ================================
+  sprigling: S({
+    dex: 7, name: 'ספריגלינג', en: 'Sprigling', types: ['verdant'],
+    base: { hp: 52, atk: 56, def: 58, spa: 60, spd: 58, spe: 44 },
+    growth: 'medium', catchRate: 45, baseExp: 64, cry: 7,
+    flavor: 'הנבט שעל גבו פורח רק כשהוא סומך על המאמן שלו.',
+    evolve: { to: 'thornmane', level: 16 },
+    learn: [[1, 'tackle'], [1, 'growl'], [5, 'leafcut'], [10, 'growshield'],
+            [15, 'seedvolley'], [21, 'siphonroot'], [28, 'vinelash'], [35, 'sporecloud']],
+    design: { body: 'quad', pal: [[110, 55, 46], [88, 70, 62], [340, 70, 72]], ears: 'round',
+              tail: 'leaf', eyes: 'sleepy', markings: 'spots', size: 0.8, aura: 'leaf' },
+  }),
+  thornmane: S({
+    dex: 8, name: "ת'ורנמיין", en: 'Thornmane', types: ['verdant'],
+    base: { hp: 72, atk: 78, def: 80, spa: 82, spd: 80, spe: 58 },
+    growth: 'medium', catchRate: 22, baseExp: 144, cry: 8,
+    flavor: 'רעמת הקוצים שלו מסננת אור שמש ומאחסנת אותו כאנרגיה.',
+    evolve: { to: 'verdantis', level: 34 },
+    learn: [[1, 'leafcut'], [1, 'growshield'], [17, 'seedvolley'], [23, 'siphonroot'],
+            [30, 'vinelash'], [38, 'sporecloud'], [46, 'bloomstorm']],
+    design: { body: 'quad', pal: [[104, 58, 40], [80, 72, 58], [330, 72, 68]], ears: 'horns',
+              tail: 'leaf', eyes: 'sharp', markings: 'spots', size: 1.02, aura: 'leaf' },
+  }),
+  verdantis: S({
+    dex: 9, name: 'ורדנטיס', en: 'Verdantis', types: ['verdant', 'lumen'],
+    base: { hp: 96, atk: 96, def: 102, spa: 104, spd: 100, spe: 68 },
+    growth: 'medium', catchRate: 12, baseExp: 242, cry: 9,
+    flavor: 'ביער שבו הוא ישן, פרחים אינם נובלים לעולם.',
+    evolve: null,
+    learn: [[1, 'vinelash'], [1, 'siphonroot'], [30, 'sporecloud'], [40, 'bloomstorm'],
+            [48, 'dazzleray'], [58, 'hypersurge']],
+    design: { body: 'biped', pal: [[100, 60, 38], [76, 74, 56], [320, 78, 70]], ears: 'horns',
+              tail: 'leaf', eyes: 'glow', markings: 'swirl', size: 1.24, aura: 'leaf' },
+  }),
+
+  // ============================ COMMON WILD ================================
+  nibbly: S({
+    dex: 10, name: 'ניבלי', en: 'Nibbly', types: ['neutral'],
+    base: { hp: 40, atk: 48, def: 38, spa: 32, spd: 36, spe: 62 },
+    growth: 'fast', catchRate: 255, baseExp: 51, cry: 10,
+    flavor: 'מכרסם כל דבר. גם דברים שאסור לו.',
+    evolve: { to: 'chompadge', level: 20 },
+    learn: [[1, 'tackle'], [1, 'growl'], [6, 'quickjab'], [11, 'scratch'],
+            [16, 'swiftstar'], [22, 'slam'], [29, 'bodyblow']],
+    design: { body: 'quad', pal: [[32, 42, 52], [30, 30, 78], [0, 0, 98]], ears: 'round',
+              tail: 'bushy', eyes: 'round', markings: 'none', size: 0.62, aura: null },
+  }),
+  chompadge: S({
+    dex: 11, name: "צ'ומפאדג'", en: 'Chompadge', types: ['neutral', 'beast'],
+    base: { hp: 68, atk: 88, def: 66, spa: 46, spd: 58, spe: 92 },
+    growth: 'fast', catchRate: 110, baseExp: 145, cry: 11,
+    flavor: 'שיניו ממשיכות לצמוח, ולכן הוא חייב לנגוס כל היום.',
+    evolve: null,
+    learn: [[1, 'quickjab'], [1, 'scratch'], [20, 'slam'], [26, 'bodyblow'],
+            [33, 'battlecry'], [41, 'ragefist']],
+    design: { body: 'quad', pal: [[26, 46, 44], [28, 34, 72], [0, 0, 96]], ears: 'pointy',
+              tail: 'bushy', eyes: 'sharp', markings: 'stripes', size: 0.9, aura: null },
+  }),
+  wingle: S({
+    dex: 12, name: 'ווינגל', en: 'Wingle', types: ['gale', 'neutral'],
+    base: { hp: 42, atk: 50, def: 40, spa: 40, spd: 42, spe: 70 },
+    growth: 'fast', catchRate: 200, baseExp: 54, cry: 12,
+    flavor: 'עף בקווים מפותלים כדי לבלבל טורפים.',
+    evolve: { to: 'skytalon', level: 18 },
+    learn: [[1, 'tackle'], [1, 'gustwing'], [8, 'quickjab'], [14, 'swiftstar'],
+            [20, 'skydive'], [28, 'cyclone']],
+    design: { body: 'avian', pal: [[196, 45, 62], [210, 30, 84], [45, 92, 62]], ears: 'none',
+              tail: 'fin', eyes: 'round', markings: 'none', size: 0.68, wings: true, aura: 'wind' },
+  }),
+  skytalon: S({
+    dex: 13, name: 'סקייטאלון', en: 'Skytalon', types: ['gale', 'beast'],
+    base: { hp: 66, atk: 84, def: 62, spa: 58, spd: 62, spe: 100 },
+    growth: 'fast', catchRate: 90, baseExp: 152, cry: 13,
+    flavor: 'צולל ממאות מטרים ופוגע בלי להאט.',
+    evolve: { to: 'stormcrest', level: 36 },
+    learn: [[1, 'gustwing'], [1, 'quickjab'], [20, 'skydive'], [27, 'clawrush'],
+            [34, 'cyclone'], [42, 'bodyblow']],
+    design: { body: 'avian', pal: [[204, 50, 50], [212, 34, 80], [40, 95, 58]], ears: 'none',
+              tail: 'fin', eyes: 'sharp', markings: 'stripes', size: 0.95, wings: true, aura: 'wind' },
+  }),
+  stormcrest: S({
+    dex: 14, name: 'סטורמקרסט', en: 'Stormcrest', types: ['gale', 'volt'],
+    base: { hp: 84, atk: 100, def: 78, spa: 92, spd: 80, spe: 118 },
+    growth: 'fast', catchRate: 45, baseExp: 245, cry: 14,
+    flavor: 'ענני סופה נאספים אחריו בכל מקום שאליו הוא טס.',
+    evolve: null,
+    learn: [[1, 'skydive'], [1, 'voltarc'], [34, 'cyclone'], [43, 'thunderlash'],
+            [52, 'hypersurge']],
+    design: { body: 'avian', pal: [[214, 60, 44], [48, 96, 62], [200, 26, 88]], ears: 'horns',
+              tail: 'fin', eyes: 'glow', markings: 'stripes', size: 1.2, wings: true, aura: 'spark' },
+  }),
+  buzzlet: S({
+    dex: 15, name: 'בזלט', en: 'Buzzlet', types: ['toxic', 'gale'],
+    base: { hp: 44, atk: 52, def: 44, spa: 56, spd: 48, spe: 66 },
+    growth: 'medium', catchRate: 190, baseExp: 58, cry: 15,
+    flavor: 'זמזום כנפיו מפזר אבקה מדגדגת ומרדימה.',
+    evolve: { to: 'nectrix', level: 24 },
+    learn: [[1, 'tackle'], [1, 'venomjab'], [9, 'gustwing'], [15, 'toxicmist'],
+            [22, 'seedvolley'], [30, 'sludgewave']],
+    design: { body: 'insect', pal: [[288, 55, 58], [56, 88, 66], [0, 0, 20]], ears: 'antenna',
+              tail: 'spike', eyes: 'multi', markings: 'stripes', size: 0.66, wings: true, aura: 'poison' },
+  }),
+  nectrix: S({
+    dex: 16, name: 'נקטריקס', en: 'Nectrix', types: ['toxic', 'lumen'],
+    base: { hp: 70, atk: 68, def: 70, spa: 100, spd: 92, spe: 88 },
+    growth: 'medium', catchRate: 75, baseExp: 168, cry: 16,
+    flavor: 'צוף מתוק־רעיל נוטף מכנפיה בזמן ריחוף.',
+    evolve: null,
+    learn: [[1, 'venomjab'], [1, 'lightmote'], [26, 'toxicmist'], [33, 'psywave'],
+            [40, 'sludgewave'], [48, 'dazzleray']],
+    design: { body: 'insect', pal: [[300, 62, 56], [320, 78, 74], [52, 92, 70]], ears: 'antenna',
+              tail: 'wisp', eyes: 'multi', markings: 'swirl', size: 0.95, wings: true, aura: 'light' },
+  }),
+  rockle: S({
+    dex: 17, name: 'רוקל', en: 'Rockle', types: ['stone'],
+    base: { hp: 52, atk: 68, def: 88, spa: 30, spd: 42, spe: 26 },
+    growth: 'slow', catchRate: 160, baseExp: 62, cry: 17,
+    flavor: 'נראה כמו סלע רגיל עד שהוא פותח עין אחת.',
+    evolve: { to: 'boulderon', level: 26 },
+    learn: [[1, 'tackle'], [1, 'harden'], [8, 'pebbletoss'], [16, 'sandveil'],
+            [23, 'boulderdrop'], [31, 'quakestep']],
+    design: { body: 'golem', pal: [[28, 24, 46], [30, 18, 66], [40, 40, 30]], ears: 'none',
+              tail: 'none', eyes: 'sleepy', markings: 'plates', size: 0.8, aura: null },
+  }),
+  boulderon: S({
+    dex: 18, name: 'בולדרון', en: 'Boulderon', types: ['stone', 'metal'],
+    base: { hp: 80, atk: 100, def: 130, spa: 44, spd: 66, spe: 34 },
+    growth: 'slow', catchRate: 60, baseExp: 172, cry: 18,
+    flavor: 'גופו נדחס תחת לחץ עד שהפך קשה כפלדה.',
+    evolve: null,
+    learn: [[1, 'pebbletoss'], [1, 'harden'], [26, 'boulderdrop'], [34, 'ironhead'],
+            [42, 'quakestep'], [50, 'platearmor']],
+    design: { body: 'golem', pal: [[220, 12, 42], [30, 20, 62], [200, 18, 78]], ears: 'horns',
+              tail: 'none', eyes: 'glow', markings: 'plates', size: 1.15, aura: null },
+  }),
+  voltpup: S({
+    dex: 19, name: 'וולטפאפ', en: 'Voltpup', types: ['volt'],
+    base: { hp: 46, atk: 54, def: 44, spa: 68, spd: 52, spe: 78 },
+    growth: 'medium', catchRate: 140, baseExp: 66, cry: 19,
+    flavor: 'פרוותו נטענת מעצמה בכל פעם שהוא רץ.',
+    evolve: { to: 'arcfang', level: 25 },
+    learn: [[1, 'tackle'], [1, 'sparkbite'], [10, 'chargeup'], [17, 'voltarc'],
+            [24, 'staticfield'], [32, 'thunderlash']],
+    design: { body: 'quad', pal: [[50, 92, 58], [42, 80, 44], [200, 20, 96]], ears: 'pointy',
+              tail: 'spike', eyes: 'sharp', markings: 'stripes', size: 0.72, aura: 'spark' },
+  }),
+  arcfang: S({
+    dex: 20, name: 'ארקפאנג', en: 'Arcfang', types: ['volt', 'beast'],
+    base: { hp: 74, atk: 88, def: 68, spa: 98, spd: 74, spe: 104 },
+    growth: 'medium', catchRate: 55, baseExp: 176, cry: 20,
+    flavor: 'קשתות חשמל מקפצות בין ניביו כשהוא נוהם.',
+    evolve: null,
+    learn: [[1, 'sparkbite'], [1, 'voltarc'], [28, 'clawrush'], [36, 'thunderlash'],
+            [44, 'battlecry'], [52, 'ragefist']],
+    design: { body: 'quad', pal: [[48, 96, 52], [30, 70, 36], [190, 30, 92]], ears: 'horns',
+              tail: 'spike', eyes: 'glow', markings: 'stripes', size: 1.05, aura: 'spark' },
+  }),
+  frostkit: S({
+    dex: 21, name: 'פרוסטקיט', en: 'Frostkit', types: ['frost'],
+    base: { hp: 50, atk: 46, def: 56, spa: 66, spd: 62, spe: 58 },
+    growth: 'medium', catchRate: 150, baseExp: 65, cry: 21,
+    flavor: 'נשימתו הופכת טיפות גשם לפתיתים קטנים.',
+    evolve: { to: 'glacierra', level: 28 },
+    learn: [[1, 'tackle'], [1, 'chillbreath'], [11, 'frostshard'], [18, 'mistveil'],
+            [26, 'glacierbeam'], [33, 'aquapulse']],
+    design: { body: 'quad', pal: [[186, 62, 72], [200, 40, 88], [210, 70, 46]], ears: 'round',
+              tail: 'bushy', eyes: 'round', markings: 'spots', size: 0.7, aura: 'ice' },
+  }),
+  glacierra: S({
+    dex: 22, name: 'גלסיירה', en: 'Glacierra', types: ['frost', 'lumen'],
+    base: { hp: 78, atk: 66, def: 88, spa: 104, spd: 96, spe: 76 },
+    growth: 'medium', catchRate: 50, baseExp: 178, cry: 22,
+    flavor: 'הילה קפואה מרחפת סביבה ומכסה הכול בכפור עדין.',
+    evolve: null,
+    learn: [[1, 'chillbreath'], [1, 'lightmote'], [30, 'glacierbeam'], [38, 'psywave'],
+            [46, 'dazzleray'], [54, 'mendlight']],
+    design: { body: 'biped', pal: [[190, 68, 66], [205, 46, 90], [320, 60, 76]], ears: 'horns',
+              tail: 'wisp', eyes: 'glow', markings: 'swirl', size: 1.08, aura: 'ice' },
+  }),
+  shadewisp: S({
+    dex: 23, name: 'שייד־וויספ', en: 'Shadewisp', types: ['umbra'],
+    base: { hp: 44, atk: 42, def: 46, spa: 74, spd: 68, spe: 76 },
+    growth: 'medium', catchRate: 130, baseExp: 68, cry: 23,
+    flavor: 'מופיע במסדרונות חשוכים ומחקה קולות של אחרים.',
+    evolve: { to: 'nocthex', level: 30 },
+    learn: [[1, 'shadownip'], [1, 'growl'], [12, 'nightveil'], [20, 'hex'],
+            [28, 'lullaby'], [36, 'voidpulse']],
+    design: { body: 'spirit', pal: [[262, 48, 46], [280, 40, 68], [50, 90, 66]], ears: 'none',
+              tail: 'wisp', eyes: 'glow', markings: 'none', size: 0.76, aura: 'shadow' },
+  }),
+  nocthex: S({
+    dex: 24, name: "נוקת'קס", en: 'Nocthex', types: ['umbra', 'toxic'],
+    base: { hp: 70, atk: 66, def: 72, spa: 110, spd: 90, spe: 96 },
+    growth: 'medium', catchRate: 45, baseExp: 182, cry: 24,
+    flavor: 'לוחש קללות ישנות שאיש כבר לא זוכר את מקורן.',
+    evolve: null,
+    learn: [[1, 'nightveil'], [1, 'hex'], [32, 'toxicmist'], [40, 'voidpulse'],
+            [48, 'sludgewave'], [56, 'hypersurge']],
+    design: { body: 'spirit', pal: [[268, 54, 38], [292, 52, 60], [45, 92, 62]], ears: 'horns',
+              tail: 'wisp', eyes: 'multi', markings: 'swirl', size: 1.05, aura: 'shadow' },
+  }),
+  cogling: S({
+    dex: 25, name: 'קוגלינג', en: 'Cogling', types: ['metal'],
+    base: { hp: 48, atk: 62, def: 82, spa: 54, spd: 60, spe: 40 },
+    growth: 'slow', catchRate: 120, baseExp: 70, cry: 25,
+    flavor: 'שריד של מכונה עתיקה שהתעורר וסירב להיכבות.',
+    evolve: { to: 'ironclad', level: 32 },
+    learn: [[1, 'tackle'], [1, 'harden'], [12, 'ironhead'], [20, 'platearmor'],
+            [27, 'gearblade'], [35, 'swiftstar']],
+    design: { body: 'golem', pal: [[210, 16, 56], [205, 24, 78], [190, 80, 60]], ears: 'antenna',
+              tail: 'none', eyes: 'glow', markings: 'plates', size: 0.74, aura: null },
+  }),
+  ironclad: S({
+    dex: 26, name: 'איירונקלאד', en: 'Ironclad', types: ['metal', 'beast'],
+    base: { hp: 82, atk: 108, def: 118, spa: 62, spd: 84, spe: 52 },
+    growth: 'slow', catchRate: 40, baseExp: 190, cry: 26,
+    flavor: 'לוחות השריון שלו נטענים מחדש בכל פגיעה שהוא סופג.',
+    evolve: null,
+    learn: [[1, 'ironhead'], [1, 'platearmor'], [34, 'gearblade'], [42, 'bodyblow'],
+            [50, 'ragefist'], [58, 'quakestep']],
+    design: { body: 'biped', pal: [[212, 20, 46], [200, 26, 74], [14, 84, 56]], ears: 'horns',
+              tail: 'spike', eyes: 'glow', markings: 'plates', size: 1.16, aura: null },
+  }),
+  brawlkin: S({
+    dex: 27, name: 'ברולקין', en: 'Brawlkin', types: ['beast'],
+    base: { hp: 58, atk: 82, def: 60, spa: 36, spd: 52, spe: 62 },
+    growth: 'medium', catchRate: 120, baseExp: 74, cry: 27,
+    flavor: 'מתאמן ללא הפסקה, גם כשאף אחד לא מסתכל.',
+    evolve: { to: 'titanox', level: 30 },
+    learn: [[1, 'quickjab'], [1, 'battlecry'], [12, 'clawrush'], [19, 'bodyblow'],
+            [27, 'screech'], [34, 'ragefist']],
+    design: { body: 'biped', pal: [[16, 52, 52], [30, 40, 74], [200, 30, 90]], ears: 'round',
+              tail: 'none', eyes: 'sharp', markings: 'none', size: 0.85, aura: null },
+  }),
+  titanox: S({
+    dex: 28, name: 'טיטאנוקס', en: 'Titanox', types: ['beast', 'stone'],
+    base: { hp: 96, atk: 122, def: 96, spa: 48, spd: 78, spe: 66 },
+    growth: 'medium', catchRate: 35, baseExp: 194, cry: 28,
+    flavor: 'מכה אחת שלו מרסקת סלעים בגודל בית.',
+    evolve: null,
+    learn: [[1, 'clawrush'], [1, 'bodyblow'], [32, 'boulderdrop'], [40, 'ragefist'],
+            [48, 'quakestep'], [56, 'battlecry']],
+    design: { body: 'biped', pal: [[12, 46, 42], [28, 34, 66], [0, 0, 96]], ears: 'horns',
+              tail: 'spike', eyes: 'glow', markings: 'stripes', size: 1.22, aura: null },
+  }),
+  slimeel: S({
+    dex: 29, name: 'סליימיל', en: 'Slimeel', types: ['toxic', 'aqua'],
+    base: { hp: 66, atk: 60, def: 62, spa: 72, spd: 66, spe: 54 },
+    growth: 'medium', catchRate: 120, baseExp: 88, cry: 29,
+    flavor: 'שוחה בביבים ובנחלים עכורים, ומנקה אותם בדרכו.',
+    evolve: null,
+    learn: [[1, 'bubblejet'], [1, 'venomjab'], [16, 'toxicmist'], [24, 'aquapulse'],
+            [32, 'sludgewave'], [40, 'tidalcrash']],
+    design: { body: 'serpent', pal: [[276, 46, 48], [180, 50, 58], [60, 80, 66]], ears: 'fins',
+              tail: 'fin', eyes: 'sleepy', markings: 'spots', size: 0.92, aura: 'poison' },
+  }),
+  puffbloom: S({
+    dex: 30, name: 'פאפבלום', en: 'Puffbloom', types: ['verdant', 'lumen'],
+    base: { hp: 60, atk: 40, def: 58, spa: 82, spd: 88, spe: 62 },
+    growth: 'medium', catchRate: 120, baseExp: 90, cry: 30,
+    flavor: 'נסחף עם הרוח ומפזר נבגים שמרגיעים כל מי שנושם אותם.',
+    evolve: null,
+    learn: [[1, 'lightmote'], [1, 'leafcut'], [15, 'sporecloud'], [23, 'siphonroot'],
+            [31, 'psywave'], [39, 'mendlight']],
+    design: { body: 'spirit', pal: [[96, 55, 62], [330, 72, 78], [50, 88, 72]], ears: 'antenna',
+              tail: 'leaf', eyes: 'sleepy', markings: 'spots', size: 0.72, aura: 'leaf' },
+  }),
+  sandclaw: S({
+    dex: 31, name: 'סנדקלאו', en: 'Sandclaw', types: ['stone', 'beast'],
+    base: { hp: 62, atk: 86, def: 74, spa: 38, spd: 52, spe: 68 },
+    growth: 'medium', catchRate: 110, baseExp: 92, cry: 31,
+    flavor: 'חופר מנהרות במדבר במהירות שקשה להאמין לה.',
+    evolve: null,
+    learn: [[1, 'scratch'], [1, 'sandveil'], [14, 'pebbletoss'], [22, 'clawrush'],
+            [30, 'boulderdrop'], [38, 'quakestep']],
+    design: { body: 'quad', pal: [[38, 52, 60], [30, 34, 76], [0, 0, 24]], ears: 'pointy',
+              tail: 'spike', eyes: 'sharp', markings: 'stripes', size: 0.88, aura: null },
+  }),
+  coralux: S({
+    dex: 32, name: 'קורלוקס', en: 'Coralux', types: ['aqua', 'lumen'],
+    base: { hp: 68, atk: 48, def: 86, spa: 90, spd: 92, spe: 50 },
+    growth: 'medium', catchRate: 90, baseExp: 96, cry: 32,
+    flavor: 'זוהר בחשכת המעמקים ומדריך שחיינים אבודים.',
+    evolve: null,
+    learn: [[1, 'bubblejet'], [1, 'lightmote'], [18, 'aquapulse'], [26, 'psywave'],
+            [34, 'mistveil'], [42, 'dazzleray']],
+    design: { body: 'aquatic', pal: [[320, 70, 68], [196, 72, 60], [50, 92, 74]], ears: 'fins',
+              tail: 'fin', eyes: 'glow', markings: 'swirl', size: 0.86, aura: 'light' },
+  }),
+  magmite: S({
+    dex: 33, name: 'מגמייט', en: 'Magmite', types: ['ember', 'metal'],
+    base: { hp: 62, atk: 84, def: 92, spa: 78, spd: 60, spe: 48 },
+    growth: 'slow', catchRate: 80, baseExp: 100, cry: 33,
+    flavor: 'ליבת מגמה עטופה בקליפת מתכת מותכת למחצה.',
+    evolve: null,
+    learn: [[1, 'emberspit'], [1, 'harden'], [18, 'ironhead'], [26, 'firewheel'],
+            [34, 'platearmor'], [42, 'infernobeam']],
+    design: { body: 'golem', pal: [[16, 80, 46], [40, 96, 60], [210, 14, 40]], ears: 'none',
+              tail: 'none', eyes: 'glow', markings: 'plates', size: 0.92, aura: 'fire' },
+  }),
+  gloomoth: S({
+    dex: 34, name: 'גלומות', en: 'Gloomoth', types: ['umbra', 'gale'],
+    base: { hp: 64, atk: 70, def: 62, spa: 88, spd: 74, spe: 90 },
+    growth: 'medium', catchRate: 85, baseExp: 104, cry: 34,
+    flavor: 'אבק הכנפיים שלו בולע אור ומשאיר כתמי חושך.',
+    evolve: null,
+    learn: [[1, 'gustwing'], [1, 'shadownip'], [20, 'nightveil'], [28, 'cyclone'],
+            [36, 'voidpulse'], [44, 'hex']],
+    design: { body: 'insect', pal: [[258, 40, 42], [240, 30, 66], [46, 92, 62]], ears: 'antenna',
+              tail: 'wisp', eyes: 'multi', markings: 'swirl', size: 0.9, wings: true, aura: 'shadow' },
+  }),
+  terrapod: S({
+    dex: 35, name: 'טראפוד', en: 'Terrapod', types: ['verdant', 'stone'],
+    base: { hp: 88, atk: 76, def: 104, spa: 58, spd: 78, spe: 34 },
+    growth: 'slow', catchRate: 70, baseExp: 108, cry: 35,
+    flavor: 'שדרה של אבן וגן קטן שגדל על גבו.',
+    evolve: null,
+    learn: [[1, 'tackle'], [1, 'growshield'], [18, 'leafcut'], [26, 'pebbletoss'],
+            [34, 'vinelash'], [44, 'quakestep']],
+    design: { body: 'golem', pal: [[100, 40, 40], [34, 30, 58], [86, 62, 62]], ears: 'none',
+              tail: 'leaf', eyes: 'sleepy', markings: 'plates', size: 1.05, aura: 'leaf' },
+  }),
+
+  // ============================= APEX ======================================
+  aetherion: S({
+    dex: 36, name: 'איתריון', en: 'Aetherion', types: ['lumen', 'gale'],
+    base: { hp: 106, atk: 96, def: 92, spa: 128, spd: 110, spe: 108 },
+    growth: 'slow', catchRate: 3, baseExp: 320, cry: 36,
+    flavor: 'מסופר שהוא נח בלב הסופה שמעל מגדל האורות.',
+    evolve: null,
+    learn: [[1, 'lightmote'], [1, 'gustwing'], [40, 'psywave'], [48, 'cyclone'],
+            [56, 'dazzleray'], [64, 'mendlight'], [70, 'hypersurge']],
+    design: { body: 'spirit', pal: [[46, 92, 74], [320, 70, 76], [200, 40, 96]], ears: 'horns',
+              tail: 'wisp', eyes: 'glow', markings: 'swirl', size: 1.3, wings: true, aura: 'light' },
+  }),
+};
+
+const SPECIES_IDS = Object.keys(SPECIES);
+const getSpecies = (id) => SPECIES[id];
+
+const STARTERS = ['emberkit', 'dewlet', 'sprigling'];
+  return { SPECIES, SPECIES_IDS, getSpecies, STARTERS };
+})();
+
+/* ===== src3d/gfx/creature3d.js ===== */
+const __m_src3d_gfx_creature3d_js = (() => {
+  const { MeshBuilder } = __m_src3d_core_meshbuilder_js;
+  const { getSpecies } = __m_src_data_species_js;
+// Builds a low-poly creature mesh from the same compact `design` block the 2D
+// artist used — body archetype, palette, ears, tail, eyes, markings, wings.
+// One data table drives both renderers, so the roster stays the single source
+// of truth for what a creature looks like.
+
+
+
+
+/** hsl (design units) -> linear-ish rgb, with saturation pushed for punch. */
+function hsl2rgb(h, s, l, boost = 1.18) {
+  s = Math.min(100, s * boost) / 100;
+  l = Math.min(96, l * 1.04) / 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => l - a * Math.max(-1, Math.min(Math.min(k(n) - 3, 9 - k(n)), 1));
+  return [f(0), f(8), f(4)];
+}
+
+const shade = (c, k) => [
+  Math.min(1, c[0] * k), Math.min(1, c[1] * k), Math.min(1, c[2] * k),
+];
+
+const DARK = [0.09, 0.08, 0.13];
+const WHITE = [0.97, 0.97, 1.0];
+
+function palette(d) {
+  const main = hsl2rgb(...d.pal[0]);
+  return {
+    main,
+    dark: shade(main, 0.68),
+    belly: hsl2rgb(...d.pal[1]),
+    accent: hsl2rgb(...d.pal[2]),
+  };
+}
+
+// --------------------------------------------------------------- features --
+function addEyes(m, P, d, y, z, spread, r) {
+  const glow = d.eyes === 'glow';
+  const count = d.eyes === 'multi' ? 3 : 1;
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < count; i++) {
+      const off = count === 1 ? 0 : (i - 1) * r * 1.5;
+      m.push();
+      m.translate(side * spread + off * side, y - Math.abs(off) * 0.3, z);
+      m.sphere(r * (count === 1 ? 1 : 0.68), glow ? P.accent : WHITE, 6, 4);
+      m.translate(0, 0, r * 0.55);
+      m.sphere(r * 0.55, glow ? WHITE : DARK, 5, 3);
+      m.pop();
+    }
+  }
+}
+
+function addEars(m, P, d, y, r) {
+  if (!d.ears || d.ears === 'none') return;
+  for (const side of [-1, 1]) {
+    m.push();
+    m.translate(side * r * 0.62, y, -r * 0.1);
+    m.rotateZ(side * 0.35);
+    switch (d.ears) {
+      case 'pointy':
+        m.taper(r * 0.3, 0, r * 1.25, P.main, 5);
+        break;
+      case 'round':
+        m.translate(0, r * 0.42, 0);
+        m.sphere(r * 0.42, P.main, 6, 4, 1.15);
+        break;
+      case 'horns':
+        m.rotateZ(side * 0.25);
+        m.taper(r * 0.26, r * 0.05, r * 1.45, P.accent, 5);
+        break;
+      case 'fins':
+        m.rotateY(Math.PI / 2);
+        m.blade([[0,0],[r*1.15,r*0.5],[r*1.25,-r*0.15],[r*0.2,-r*0.35]], P.accent, r * 0.14);
+        break;
+      case 'antenna':
+        m.taper(r * 0.09, r * 0.05, r * 1.5, P.dark, 4);
+        m.translate(0, r * 1.5, 0);
+        m.sphere(r * 0.2, P.accent, 5, 4);
+        break;
+      default: break;
+    }
+    m.pop();
+  }
+}
+
+function addTail(m, P, d, x, y, z, s) {
+  if (!d.tail || d.tail === 'none') return;
+  m.push();
+  m.translate(x, y, z);
+  switch (d.tail) {
+    case 'flame':
+      m.limb(0, 0, 0, 0, s * 0.85, -s * 0.5, s * 0.17, s * 0.09, P.main);
+      m.push();
+      m.translate(0, s * 0.85, -s * 0.5);
+      m.taper(s * 0.3, 0, s * 0.75, hsl2rgb(22, 96, 56), 6);
+      m.translate(0, s * 0.12, 0);
+      m.taper(s * 0.2, 0, s * 0.55, hsl2rgb(44, 100, 66), 6);
+      m.pop();
+      break;
+    case 'leaf':
+      m.limb(0, 0, 0, 0, s * 0.7, -s * 0.55, s * 0.13, s * 0.07, P.dark);
+      m.push();
+      m.translate(0, s * 0.7, -s * 0.55);
+      m.rotateX(-0.7);
+      for (const side of [-1, 1]) {
+        m.push(); m.rotateY(side * 0.5);
+        m.blade([[0,0],[side*s*0.45,s*0.4],[side*s*0.15,s*0.85],[0,s*0.5]], P.accent, s * 0.08);
+        m.pop();
+      }
+      m.pop();
+      break;
+    case 'bushy':
+      m.limb(0, 0, 0, 0, s * 0.55, -s * 0.6, s * 0.2, s * 0.14, P.main);
+      m.push();
+      m.translate(0, s * 0.62, -s * 0.68);
+      m.sphere(s * 0.42, P.belly, 7, 5, 1.25);
+      m.pop();
+      break;
+    case 'spike':
+      m.push(); m.rotateX(2.2);
+      m.taper(s * 0.22, 0, s * 1.05, P.accent, 5);
+      m.pop();
+      break;
+    case 'fin':
+      m.push(); m.rotateY(Math.PI / 2);
+      m.blade([[0,0],[-s*0.9,s*0.7],[-s*1.1,0],[-s*0.9,-s*0.6]], P.accent, s * 0.1);
+      m.pop();
+      break;
+    case 'wisp':
+      for (let i = 0; i < 4; i++) {
+        const t = i / 4;
+        m.push();
+        m.translate(0, s * 0.25 * Math.sin(t * 3), -s * (0.25 + t * 0.8));
+        m.sphere(s * (0.24 - t * 0.14), P.belly, 5, 4);
+        m.pop();
+      }
+      break;
+    default: break;
+  }
+  m.pop();
+}
+
+function addWings(m, P, d, y, z, s) {
+  if (!d.wings) return;
+  const inner = shade(P.accent, 1.05);
+  const outer = shade(P.main, 1.15);
+  for (const side of [-1, 1]) {
+    m.push();
+    m.translate(side * s * 0.35, y, z);
+    m.rotateY(side * -0.55);
+    m.rotateZ(side * 0.3);
+    // two panels folded slightly apart so the wing has volume from any angle
+    m.push(); m.rotateY(side * 0.16);
+    m.blade([[0,0],[side*s*0.95,s*0.7],[side*s*1.15,s*0.05],[side*s*0.55,-s*0.45]],
+      inner, s * 0.06);
+    m.pop();
+    m.push(); m.translate(side * s * 0.9, s * 0.28, 0); m.rotateY(side * -0.2); m.rotateZ(side * -0.18);
+    m.blade([[0,0],[side*s*0.85,s*0.42],[side*s*1.0,-s*0.2],[side*s*0.35,-s*0.5]],
+      outer, s * 0.06);
+    m.pop();
+    // leading edge bone
+    m.limb(0, 0, 0, side * s * 1.6, s * 0.55, 0, s * 0.07, s * 0.03, P.dark);
+    m.pop();
+  }
+}
+
+/** Stripes / plates read as banding on the body; spots as bumps. */
+function addMarkings(m, P, d, w, h, dep) {
+  switch (d.markings) {
+    case 'stripes':
+      for (let i = -1; i <= 1; i++) {
+        m.push();
+        m.translate(0, h * 0.1, i * dep * 0.28);
+        m.box(w * 1.02, h * 0.5, dep * 0.12, shade(P.accent, 0.9));
+        m.pop();
+      }
+      break;
+    case 'plates':
+      for (let i = -1; i <= 1; i++) {
+        m.push();
+        m.translate(0, h * 0.42, i * dep * 0.3);
+        m.box(w * 0.7, h * 0.16, dep * 0.2, P.accent);
+        m.pop();
+      }
+      break;
+    case 'spots':
+      for (let i = 0; i < 5; i++) {
+        const a = i * 2.4;
+        m.push();
+        m.translate(Math.cos(a) * w * 0.32, h * 0.12 + Math.sin(a * 1.7) * h * 0.22,
+                    Math.sin(a) * dep * 0.34);
+        m.sphere(w * 0.13, P.accent, 5, 4);
+        m.pop();
+      }
+      break;
+    case 'swirl':
+      for (let i = 0; i < 6; i++) {
+        const a = i * 1.1, r = (i / 6) * w * 0.42;
+        m.push();
+        m.translate(Math.cos(a) * r, h * 0.15 + Math.sin(a) * r * 0.5, dep * 0.46);
+        m.sphere(w * 0.08, P.accent, 4, 3);
+        m.pop();
+      }
+      break;
+    default: break;
+  }
+}
+
+// -------------------------------------------------------------- archetypes --
+const BODIES = {
+  quad(m, P, d) {
+    const w = 0.8, h = 0.62, dep = 1.25;
+    m.push(); m.translate(0, 0.95, 0);
+    m.box(w, h, dep, P.main, shade(P.main, 1.12));
+    addMarkings(m, P, d, w, h, dep);
+    m.push(); m.translate(0, -h * 0.42, 0);
+    m.box(w * 0.82, h * 0.3, dep * 0.85, P.belly);
+    m.pop();
+    m.pop();
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      m.limb(sx * w * 0.34, 0.95 - h * 0.3, sz * dep * 0.34,
+             sx * w * 0.36, 0.06, sz * dep * 0.36, 0.14, 0.12,
+             sz < 0 ? P.dark : P.main);
+      m.push(); m.translate(sx * w * 0.36, 0.06, sz * dep * 0.36);
+      m.box(0.3, 0.12, 0.36, P.accent);
+      m.pop();
+    }
+    m.push(); m.translate(0, 1.28, dep * 0.62);
+    m.sphere(0.52, P.main, 8, 6, 0.95);
+    m.push(); m.translate(0, -0.1, 0.42);
+    m.box(0.42, 0.3, 0.34, P.belly);
+    m.pop();
+    addEyes(m, P, d, 0.12, 0.44, 0.22, 0.13);
+    addEars(m, P, d, 0.4, 0.5);
+    m.pop();
+    addTail(m, P, d, 0, 1.1, -dep * 0.62, 1.0);
+    addWings(m, P, d, 1.3, -0.1, 0.9);
+  },
+
+  biped(m, P, d) {
+    const w = 0.78, h = 1.0, dep = 0.62;
+    for (const sx of [-1, 1]) {
+      m.limb(sx * 0.24, 0.9, 0, sx * 0.26, 0.08, 0.02, 0.17, 0.14, P.dark);
+      m.push(); m.translate(sx * 0.26, 0.07, 0.08);
+      m.box(0.32, 0.14, 0.46, P.accent);
+      m.pop();
+    }
+    m.push(); m.translate(0, 1.42, 0);
+    m.box(w, h, dep, P.main, shade(P.main, 1.1));
+    addMarkings(m, P, d, w, h, dep);
+    m.push(); m.translate(0, -h * 0.1, dep * 0.42);
+    m.box(w * 0.6, h * 0.62, dep * 0.2, P.belly);
+    m.pop();
+    m.pop();
+    for (const sx of [-1, 1]) {
+      m.limb(sx * w * 0.55, 1.78, 0, sx * (w * 0.62), 1.05, 0.12, 0.14, 0.12, P.main);
+      m.push(); m.translate(sx * w * 0.62, 1.0, 0.14);
+      m.sphere(0.17, P.accent, 6, 4);
+      m.pop();
+    }
+    m.push(); m.translate(0, 2.16, 0.02);
+    m.sphere(0.5, P.main, 8, 6);
+    addEyes(m, P, d, 0.06, 0.42, 0.2, 0.13);
+    addEars(m, P, d, 0.38, 0.48);
+    m.pop();
+    addTail(m, P, d, 0, 1.1, -dep * 0.6, 1.0);
+    addWings(m, P, d, 1.7, -dep * 0.4, 1.0);
+  },
+
+  serpent(m, P, d) {
+    const seg = 9;
+    for (let i = 0; i < seg; i++) {
+      const t = i / (seg - 1);
+      const r = 0.42 * (1 - t * 0.45);
+      m.push();
+      m.translate(Math.sin(t * 5) * 0.5, 0.4 + t * 1.5, -t * 1.1 + 0.5);
+      m.sphere(r, i % 2 ? P.main : shade(P.main, 0.92), 7, 5);
+      m.pop();
+    }
+    m.push(); m.translate(Math.sin(5) * 0.5, 2.05, -0.65);
+    m.sphere(0.48, P.main, 8, 6, 0.9);
+    m.push(); m.translate(0, -0.06, 0.4);
+    m.box(0.4, 0.26, 0.4, P.belly);
+    m.pop();
+    addEyes(m, P, d, 0.12, 0.4, 0.2, 0.12);
+    addEars(m, P, d, 0.36, 0.46);
+    m.pop();
+    addTail(m, P, d, 0.2, 0.4, 0.7, 0.9);
+    addWings(m, P, d, 1.5, 0, 0.95);
+  },
+
+  avian(m, P, d) {
+    for (const sx of [-1, 1]) {
+      m.limb(sx * 0.16, 0.85, 0, sx * 0.18, 0.06, 0, 0.07, 0.06, P.accent);
+      m.push(); m.translate(sx * 0.18, 0.05, 0.1);
+      m.box(0.2, 0.08, 0.34, P.accent);
+      m.pop();
+    }
+    m.push(); m.translate(0, 1.3, 0);
+    m.sphere(0.6, P.main, 8, 6, 1.15);
+    addMarkings(m, P, d, 1.0, 1.1, 1.0);
+    m.push(); m.translate(0, -0.12, 0.34);
+    m.sphere(0.36, P.belly, 6, 5, 1.1);
+    m.pop();
+    m.pop();
+    m.push(); m.translate(0, 2.0, 0.1);
+    m.sphere(0.42, P.main, 8, 6);
+    m.push(); m.translate(0, -0.04, 0.36);
+    m.rotateX(Math.PI / 2);
+    m.taper(0.16, 0, 0.42, P.accent, 5);
+    m.pop();
+    addEyes(m, P, d, 0.1, 0.34, 0.18, 0.11);
+    addEars(m, P, d, 0.32, 0.42);
+    m.pop();
+    addTail(m, P, d, 0, 1.15, -0.6, 1.0);
+    // Wings are the silhouette here, so an avian always gets them.
+    const saved = d.wings; d.wings = true;
+    addWings(m, P, d, 1.35, 0, 1.05);
+    d.wings = saved;
+  },
+
+  insect(m, P, d) {
+    for (let i = 0; i < 3; i++) {
+      m.push();
+      m.translate(0, 1.05 - i * 0.06, -i * 0.42);
+      m.sphere(0.38 - i * 0.05, i % 2 ? P.accent : P.main, 7, 5, 1.05);
+      m.pop();
+    }
+    for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) {
+      m.limb(sx * 0.22, 1.0, 0.15 - i * 0.3,
+             sx * 0.72, 0.08, 0.3 - i * 0.42, 0.055, 0.04, P.dark);
+    }
+    m.push(); m.translate(0, 1.2, 0.55);
+    m.sphere(0.36, P.main, 7, 5);
+    addEyes(m, P, d, 0.06, 0.3, 0.17, 0.12);
+    addEars(m, P, d, 0.28, 0.4);
+    m.pop();
+    const saved = d.wings; d.wings = true;
+    addWings(m, P, d, 1.35, -0.15, 0.95);
+    d.wings = saved;
+    addTail(m, P, d, 0, 1.0, -1.0, 0.8);
+  },
+
+  aquatic(m, P, d) {
+    m.push(); m.translate(0, 1.15, 0);
+    m.sphere(0.72, P.main, 9, 6, 1.05);
+    addMarkings(m, P, d, 1.1, 1.2, 1.1);
+    m.push(); m.translate(0, -0.2, 0.3);
+    m.sphere(0.44, P.belly, 6, 5, 0.9);
+    m.pop();
+    // dorsal fin
+    m.push(); m.translate(0, 0.6, -0.1); m.rotateY(Math.PI / 2);
+    m.blade([[0,0],[0.5,0.7],[-0.5,0.55]], P.accent, 0.1);
+    m.pop();
+    for (const sx of [-1, 1]) {
+      m.push(); m.translate(sx * 0.62, -0.05, 0.05); m.rotateZ(sx * -0.5);
+      m.blade([[0,0],[sx*0.7,0.3],[sx*0.6,-0.35]], P.accent, 0.08);
+      m.pop();
+    }
+    addEyes(m, P, d, 0.22, 0.62, 0.26, 0.14);
+    addEars(m, P, d, 0.5, 0.55);
+    m.pop();
+    addTail(m, P, d, 0, 1.05, -0.7, 1.0);
+  },
+
+  golem(m, P, d) {
+    m.push(); m.translate(0, 0.95, 0);
+    m.box(1.15, 1.25, 0.95, P.main, shade(P.main, 1.14));
+    addMarkings(m, P, d, 1.15, 1.25, 0.95);
+    m.pop();
+    for (const sx of [-1, 1]) {
+      m.push(); m.translate(sx * 0.8, 1.05, 0);
+      m.box(0.4, 0.75, 0.4, P.belly);
+      m.pop();
+      m.push(); m.translate(sx * 0.34, 0.2, 0);
+      m.box(0.44, 0.42, 0.55, shade(P.main, 0.8));
+      m.pop();
+    }
+    m.push(); m.translate(0, 1.92, 0);
+    m.box(0.78, 0.62, 0.7, shade(P.main, 1.08));
+    addEyes(m, P, d, 0.04, 0.36, 0.2, 0.12);
+    addEars(m, P, d, 0.32, 0.42);
+    m.pop();
+    addTail(m, P, d, 0, 0.9, -0.55, 0.9);
+    addWings(m, P, d, 1.5, -0.4, 1.0);
+  },
+
+  spirit(m, P, d) {
+    m.push(); m.translate(0, 1.45, 0);
+    m.sphere(0.68, P.main, 9, 7);
+    addMarkings(m, P, d, 1.0, 1.1, 1.0);
+    addEyes(m, P, d, 0.14, 0.58, 0.24, 0.15);
+    addEars(m, P, d, 0.5, 0.6);
+    m.pop();
+    // trailing skirt of shrinking blobs instead of legs
+    for (let i = 0; i < 4; i++) {
+      const t = i / 4;
+      m.push();
+      m.translate(0, 0.95 - t * 0.55, 0);
+      m.sphere(0.5 - t * 0.28, shade(P.main, 0.9 - t * 0.15), 7, 4, 0.7);
+      m.pop();
+    }
+    addTail(m, P, d, 0, 1.2, -0.55, 1.0);
+    addWings(m, P, d, 1.6, -0.2, 1.0);
+  },
+};
+
+/** @returns geometry data ready for Renderer.mesh() */
+function buildCreatureMesh(speciesId) {
+  const sp = getSpecies(speciesId);
+  const d = sp.design;
+  const P = palette(d);
+  const m = new MeshBuilder();
+  // Creatures are authored around 2 units tall; this lifts them to read
+  // properly next to a ~2.6 unit player.
+  const s = (d.size ?? 1) * 1.35;
+  m.push();
+  m.scale(s, s, s);
+  (BODIES[d.body] || BODIES.quad)(m, P, d);
+  m.pop();
+  return m.data();
+}
+
+const AURA_COLOR = {
+  fire: [1.0, 0.45, 0.15], spark: [1.0, 0.9, 0.25], leaf: [0.4, 0.9, 0.35],
+  bubble: [0.4, 0.8, 1.0], shadow: [0.45, 0.3, 0.75], light: [1.0, 0.92, 0.6],
+  ice: [0.6, 0.95, 1.0], poison: [0.8, 0.4, 0.95], wind: [0.8, 0.95, 1.0],
+};
+  return { hsl2rgb, buildCreatureMesh, AURA_COLOR };
+})();
+
+/* ===== src/world/tiles.js ===== */
+const __m_src_world_tiles_js = (() => {
+// Tile vocabulary.  Maps are authored as plain strings, one char per tile,
+// which keeps the map files readable and diff-friendly.
+
+const TILE = 64;              // pixels per tile
+const VIEW_TILES_X = 15;      // 960 / 64
+const VIEW_TILES_Y = 10;      // 640 / 64
+
+// ground: which surface is painted underneath
+// solid:  blocks movement
+// enc:    triggers wild encounters
+// ledge:  one-way hop, value = allowed direction
+const TILES = {
+  '.': { ground: 'grass' },
+  '=': { ground: 'path' },
+  's': { ground: 'sand' },
+  'b': { ground: 'bridge' },
+  'f': { ground: 'wood' },
+  't': { ground: 'tilefloor' },
+  'c': { ground: 'carpet' },
+  '~': { ground: 'water', solid: true, water: true },
+  'w': { ground: 'shallow', solid: true, water: true },
+
+  ',': { ground: 'grass', enc: 'grass', tall: true },
+  '"': { ground: 'sand', enc: 'sand', tall: true },
+  ';': { ground: 'rock', enc: 'cave', dark: true },
+  '*': { ground: 'grass', deco: 'flower' },
+  '%': { ground: 'grass', deco: 'bush' },
+
+  '#': { ground: 'grass', solid: true, deco: 'tree' },
+  'T': { ground: 'grass', solid: true, deco: 'bigtree' },
+  '^': { ground: 'rock', solid: true, deco: 'cliff' },
+  'o': { ground: 'grass', solid: true, deco: 'boulder', inherit: true },
+  'O': { ground: 'rock', solid: true, deco: 'boulder', inherit: true },
+  '|': { ground: 'grass', solid: true, deco: 'fence', inherit: true },
+  '-': { ground: 'grass', ledge: 'down' },
+  'S': { ground: 'grass', solid: true, deco: 'sign', sign: true, inherit: true },
+  'C': { ground: 'wood', solid: true, deco: 'counter' },
+  'B': { ground: 'wood', solid: true, deco: 'shelf' },
+  'M': { ground: 'tilefloor', solid: true, deco: 'machine' },
+  'P': { ground: 'wood', solid: true, deco: 'pc' },
+  'x': { ground: 'wood', solid: true, deco: 'crate' },
+  'X': { ground: 'path', solid: true, deco: 'crate', inherit: true },
+  'D': { ground: 'path', door: true },
+  'd': { ground: 'wood', door: true },
+  'H': { ground: 'grass', solid: true, deco: 'wall' },
+  'r': { ground: 'rock' },
+  'R': { ground: 'rock', solid: true, deco: 'cliff' },
+  ' ': { ground: 'void', solid: true, void: true },
+};
+
+function tileInfo(ch) { return TILES[ch] || TILES[' ']; }
+  return { TILE, VIEW_TILES_X, VIEW_TILES_Y, TILES, tileInfo };
+})();
+
+/* ===== src/core/util.js ===== */
+const __m_src_core_util_js = (() => {
+// Small math / helper toolbox shared by every subsystem.
+
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const inv = (a, b, v) => (b === a ? 0 : (v - a) / (b - a));
+const approach = (v, target, step) =>
+  v < target ? Math.min(v + step, target) : Math.max(v - step, target);
+
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+const easeInCubic = (t) => t * t * t;
+const easeInOutCubic = (t) =>
+  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeOutBack = (t) => {
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+};
+
+/** Deterministic 32-bit PRNG (mulberry32). Used for anything that must look
+ *  the same on every machine — procedural sprites, tile textures, map decor. */
+function makeRng(seed) {
+  let a = seed >>> 0;
+  return function rng() {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Stable hash of a string -> unsigned 32-bit int, so species ids can seed art. */
+function hashStr(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+// Runtime randomness (battles, encounters) — not seeded on purpose.
+const rnd = (n = 1) => Math.random() * n;
+const rndInt = (n) => Math.floor(Math.random() * n);
+const rangeInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const chance = (p) => Math.random() < p;
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+function pickWeighted(entries) {
+  let total = 0;
+  for (const e of entries) total += e.weight ?? 1;
+  let r = Math.random() * total;
+  for (const e of entries) {
+    r -= e.weight ?? 1;
+    if (r <= 0) return e;
+  }
+  return entries[entries.length - 1];
+}
+
+/** 2D value noise, smooth and cheap — used for grass/water/rock texturing. */
+function valueNoise2D(seed) {
+  const rng = makeRng(seed);
+  const perm = new Float32Array(256 * 256);
+  for (let i = 0; i < perm.length; i++) perm[i] = rng();
+  const at = (x, y) => perm[((y & 255) << 8) | (x & 255)];
+  return function noise(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf);
+    const v = yf * yf * (3 - 2 * yf);
+    const a = at(xi, yi), b = at(xi + 1, yi);
+    const c = at(xi, yi + 1), d = at(xi + 1, yi + 1);
+    return lerp(lerp(a, b, u), lerp(c, d, u), v);
+  };
+}
+
+function fbm(noise, x, y, octaves = 4) {
+  let v = 0, amp = 0.5, freq = 1, norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    v += noise(x * freq, y * freq) * amp;
+    norm += amp;
+    amp *= 0.5; freq *= 2;
+  }
+  return v / norm;
+}
+
+/** hsl -> css string helper so palettes can be shifted programmatically. */
+const hsl = (h, s, l, a = 1) =>
+  a >= 1 ? `hsl(${h} ${s}% ${l}%)` : `hsl(${h} ${s}% ${l}% / ${a})`;
+
+function shade(color, amount) {
+  // color: [h,s,l]; amount in lightness percentage points
+  return hsl(color[0], color[1], clamp(color[2] + amount, 0, 100));
+}
+
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+  return { clamp, lerp, inv, approach, easeOutCubic, easeInCubic, easeInOutCubic, easeOutBack, makeRng, hashStr, rnd, rndInt, rangeInt, chance, pick, pickWeighted, valueNoise2D, fbm, hsl, shade, makeCanvas };
+})();
+
+/* ===== src3d/world/terrain3d.js ===== */
+const __m_src3d_world_terrain3d_js = (() => {
+  const { MeshBuilder } = __m_src3d_core_meshbuilder_js;
+  const { hsl2rgb } = __m_src3d_gfx_creature3d_js;
+  const { tileInfo } = __m_src_world_tiles_js;
+  const { valueNoise2D, fbm, makeRng } = __m_src_core_util_js;
+// Turns an existing ASCII map into low-poly 3D terrain.
+//
+// The 2D game's maps stay the single source of truth for the world layout —
+// this module only decides how each tile looks and how high it sits, then
+// welds the whole thing into one mesh.
+
+
+
+
+
+
+const UNIT = 4;          // world units per map tile
+const WATER_DROP = -2.4;
+const CLIFF_RISE = 3.2;
+
+// Vivid, saturated ground palette — the "more alive" look starts here.
+// Variants are deliberately close together: enough to break up a big field,
+// not enough to read as a chequerboard.
+const GROUND = {
+  grass:     [[103, 56, 40], [99, 58, 42], [107, 54, 38], [101, 60, 41], [105, 55, 43]],
+  path:      [[36, 44, 58], [34, 42, 56], [38, 45, 60]],
+  sand:      [[44, 60, 70], [42, 57, 68], [46, 62, 72]],
+  rock:      [[26, 17, 43], [25, 15, 41], [27, 18, 45]],
+  water:     [[204, 52, 26]],
+  shallow:   [[188, 70, 60]],
+  bridge:    [[28, 44, 44]],
+  wood:      [[28, 44, 42]],
+  tilefloor: [[206, 20, 68]],
+  carpet:    [[348, 52, 44]],
+  void:      [[230, 24, 12]],
+};
+
+function groundColor(mat, x, z) {
+  const set = GROUND[mat] || GROUND.grass;
+  // a hash, not a stride, so neighbours do not alternate in a visible pattern
+  const h = ((x * 73856093) ^ (z * 19349663)) >>> 0;
+  return hsl2rgb(...set[h % set.length]);
+}
+
+/** Per-tile base elevation, before smoothing. */
+function baseHeight(map, x, z, noise) {
+  const info = map.info(x, z);
+  if (info.water) return WATER_DROP;
+  if (info.deco === 'cliff') return CLIFF_RISE;
+  // Towns and interiors stay flat; open ground rolls gently.
+  if (['path', 'wood', 'tilefloor', 'carpet', 'bridge'].includes(info.ground)) return 0;
+  return (fbm(noise, x / 9, z / 9, 3) - 0.5) * 1.7;
+}
+
+class Terrain3D {
+  constructor(map) {
+    this.map = map;
+    this.w = map.w;
+    this.h = map.h;
+    const noise = valueNoise2D(0xA57E);
+
+    // tile heights, then vertex heights as the average of adjacent tiles
+    this.tileH = new Float32Array(this.w * this.h);
+    for (let z = 0; z < this.h; z++) {
+      for (let x = 0; x < this.w; x++) this.tileH[z * this.w + x] = baseHeight(map, x, z, noise);
+    }
+    this.vertH = new Float32Array((this.w + 1) * (this.h + 1));
+    for (let z = 0; z <= this.h; z++) {
+      for (let x = 0; x <= this.w; x++) {
+        let sum = 0, n = 0;
+        for (const [dx, dz] of [[-1,-1],[0,-1],[-1,0],[0,0]]) {
+          const tx = x + dx, tz = z + dz;
+          if (tx < 0 || tz < 0 || tx >= this.w || tz >= this.h) continue;
+          sum += this.tileH[tz * this.w + tx]; n++;
+        }
+        this.vertH[z * (this.w + 1) + x] = n ? sum / n : 0;
+      }
+    }
+  }
+
+  vertexHeight(x, z) {
+    x = Math.max(0, Math.min(this.w, x));
+    z = Math.max(0, Math.min(this.h, z));
+    return this.vertH[z * (this.w + 1) + x];
+  }
+
+  /** Bilinear ground height at a world position — what the player stands on. */
+  heightAt(wx, wz) {
+    const fx = wx / UNIT, fz = wz / UNIT;
+    const x0 = Math.floor(fx), z0 = Math.floor(fz);
+    const tx = fx - x0, tz = fz - z0;
+    const h00 = this.vertexHeight(x0, z0), h10 = this.vertexHeight(x0 + 1, z0);
+    const h01 = this.vertexHeight(x0, z0 + 1), h11 = this.vertexHeight(x0 + 1, z0 + 1);
+    return (h00 * (1 - tx) + h10 * tx) * (1 - tz) + (h01 * (1 - tx) + h11 * tx) * tz;
+  }
+
+  tileAtWorld(wx, wz) {
+    return { x: Math.floor(wx / UNIT), z: Math.floor(wz / UNIT) };
+  }
+
+  build() {
+    const m = new MeshBuilder();
+    const H = (x, z) => this.vertexHeight(x, z);
+    for (let z = 0; z < this.h; z++) {
+      for (let x = 0; x < this.w; x++) {
+        const info = this.map.info(x, z);
+        if (info.void) continue;
+        const mat = info.ground === 'void' ? 'grass' : info.ground;
+        const c = groundColor(mat, x, z);
+        const x0 = x * UNIT, x1 = x0 + UNIT, z0 = z * UNIT, z1 = z0 + UNIT;
+        const a = [x0, H(x, z), z0], b = [x1, H(x + 1, z), z0];
+        const cc = [x1, H(x + 1, z + 1), z1], d = [x0, H(x, z + 1), z1];
+        // split along the shorter diagonal so slopes stay clean
+        if (Math.abs(a[1] - cc[1]) <= Math.abs(b[1] - d[1])) {
+          m.tri(a[0],a[1],a[2], d[0],d[1],d[2], cc[0],cc[1],cc[2], c);
+          m.tri(a[0],a[1],a[2], cc[0],cc[1],cc[2], b[0],b[1],b[2], c);
+        } else {
+          m.tri(a[0],a[1],a[2], d[0],d[1],d[2], b[0],b[1],b[2], c);
+          m.tri(b[0],b[1],b[2], d[0],d[1],d[2], cc[0],cc[1],cc[2], c);
+        }
+      }
+    }
+    return m.data();
+  }
+
+  /** Separate translucent pass so water reads as a surface over the bed. */
+  buildWater() {
+    const m = new MeshBuilder();
+    const c = hsl2rgb(203, 68, 34);
+    let any = false;
+    for (let z = 0; z < this.h; z++) {
+      for (let x = 0; x < this.w; x++) {
+        if (!this.map.info(x, z).water) continue;
+        any = true;
+        const x0 = x * UNIT, x1 = x0 + UNIT, z0 = z * UNIT, z1 = z0 + UNIT;
+        const y = -0.45;
+        m.quad([x0,y,z0], [x0,y,z1], [x1,y,z1], [x1,y,z0], c);
+      }
+    }
+    return any ? m.data() : null;
+  }
+}
+
+// ------------------------------------------------------------------ props --
+const TRUNK = hsl2rgb(26, 46, 30);
+
+function emitTree(m, rng, big) {
+  const scale = big ? 1.35 : 1;
+  m.push(); m.scale(scale, scale, scale);
+  m.push(); m.translate(0, 1.5, 0);
+  m.taper(0.32, 0.24, 0, TRUNK, 6);
+  m.pop();
+  m.push(); m.translate(0, 0, 0);
+  m.taper(0.36, 0.26, 1.7, TRUNK, 6);
+  m.pop();
+  // stacked canopy discs, darker at the bottom
+  const hue = 104 + (rng() - 0.5) * 26;
+  for (let i = 0; i < 3; i++) {
+    const t = i / 2;
+    m.push();
+    m.translate(0, 1.5 + i * 0.95, 0);
+    m.taper(2.1 - i * 0.55, 0.9 - i * 0.35, 1.35,
+      hsl2rgb(hue, 58 + i * 6, 26 + i * 9), 7);
+    m.pop();
+  }
+  m.pop();
+}
+
+function emitRock(m, rng) {
+  const c = hsl2rgb(28, 16, 46);
+  for (let i = 0; i < 3; i++) {
+    m.push();
+    m.translate((rng() - 0.5) * 0.8, 0.35 + rng() * 0.4, (rng() - 0.5) * 0.8);
+    m.rotateY(rng() * 3);
+    m.box(0.9 + rng() * 0.7, 0.7 + rng() * 0.6, 0.9 + rng() * 0.7, c, hsl2rgb(30, 14, 58));
+    m.pop();
+  }
+}
+
+function emitTuft(m, rng) {
+  for (let i = 0; i < 7; i++) {
+    const a = rng() * 6.28, r = rng() * 1.5;
+    const hgt = 0.9 + rng() * 0.7;
+    m.push();
+    m.translate(Math.cos(a) * r, 0, Math.sin(a) * r);
+    m.rotateY(rng() * 3);
+    m.blade([[0,0],[0.16,hgt * 0.6],[0.05,hgt],[-0.16,hgt * 0.55]],
+      hsl2rgb(98 + rng() * 22, 66, 34 + rng() * 14), 0.06);
+    m.pop();
+  }
+}
+
+function emitBuilding(m, b) {
+  const w = b.w * UNIT, d = b.h * UNIT, wallH = 5.2;
+  const wall = hsl2rgb(b.wall > 60 ? 40 : b.wall, 16, 78);
+  const roof = hsl2rgb(b.roof, 62, 44);
+  const roofDark = hsl2rgb(b.roof, 58, 32);
+  m.push(); m.translate(0, wallH / 2, 0);
+  m.box(w, wallH, d, wall, wall);
+  m.pop();
+  // hipped roof: four triangles up to a ridge
+  const ex = w / 2 + 0.7, ez = d / 2 + 0.7, ry = wallH + 3.2;
+  const corners = [[-ex, wallH, -ez], [ex, wallH, -ez], [ex, wallH, ez], [-ex, wallH, ez]];
+  for (let i = 0; i < 4; i++) {
+    const a = corners[i], bb = corners[(i + 1) % 4];
+    m.tri(a[0],a[1],a[2], bb[0],bb[1],bb[2], 0,ry,0, i % 2 ? roof : roofDark);
+  }
+  // door
+  m.push(); m.translate(0, 1.5, d / 2 + 0.06);
+  m.box(2.4, 3.0, 0.2, hsl2rgb(26, 52, 30));
+  m.pop();
+}
+
+/** Every prop on the map baked into a single mesh — one draw call for the lot. */
+function buildProps(map, terrain) {
+  const rng = makeRng(0xBEEF);
+  const m = new MeshBuilder();
+  for (let z = 0; z < map.h; z++) {
+    for (let x = 0; x < map.w; x++) {
+      const info = map.info(x, z);
+      if (!info.deco && !info.tall) continue;
+      const wx = x * UNIT + UNIT / 2, wz = z * UNIT + UNIT / 2;
+      const y = terrain.heightAt(wx, wz);
+      const jitter = ((x * 31 + z * 17) % 9) / 9;
+      m.push();
+      m.translate(wx, y, wz);
+      m.rotateY(jitter * 6.28);
+      switch (info.deco) {
+        case 'tree': m.scale(0.9 + jitter * 0.4, 0.9 + jitter * 0.4, 0.9 + jitter * 0.4); emitTree(m, rng, false); break;
+        case 'bigtree': emitTree(m, rng, true); break;
+        case 'boulder': emitRock(m, rng); break;
+        case 'cliff': break;   // cliffs are already terrain elevation
+        default:
+          if (info.tall) emitTuft(m, rng);
+      }
+      m.pop();
+    }
+  }
+  for (const b of map.buildings || []) {
+    const wx = (b.x + b.w / 2) * UNIT, wz = (b.y + b.h / 2) * UNIT;
+    m.push();
+    m.translate(wx, terrain.heightAt(wx, wz), wz);
+    emitBuilding(m, b);
+    m.pop();
+  }
+  return m.data();
+}
+  return { UNIT, Terrain3D, buildProps };
+})();
+
+/* ===== src/gfx/actor.js ===== */
+const __m_src_gfx_actor_js = (() => {
+  const { hsl, clamp } = __m_src_core_util_js;
+// Human characters (player + NPCs) are drawn procedurally too, so a new NPC
+// costs one line of colours instead of a spritesheet.
+//
+// Authored in a 40 x 60 box, feet at (0, 0), facing one of 4 directions.
+
+
+
+const LOOKS = {
+  hero:     { skin: [26, 45, 74], hair: [16, 55, 26], top: [200, 62, 46], pants: [222, 30, 30], hat: [352, 62, 48], bag: [40, 60, 46] },
+  heroine:  { skin: [28, 50, 78], hair: [34, 60, 42], top: [340, 60, 58], pants: [220, 28, 32], hat: [200, 55, 52], bag: [46, 62, 50] },
+  prof:     { skin: [28, 40, 76], hair: [0, 0, 82], top: [0, 0, 92], pants: [220, 18, 36], hat: null, bag: null },
+  nurse:    { skin: [28, 46, 80], hair: [340, 55, 62], top: [0, 0, 96], pants: [0, 0, 90], hat: [350, 60, 66], bag: null },
+  clerk:    { skin: [26, 42, 68], hair: [30, 40, 30], top: [206, 55, 48], pants: [220, 20, 30], hat: null, bag: null },
+  villager: { skin: [27, 44, 72], hair: [24, 45, 34], top: [140, 40, 44], pants: [30, 30, 36], hat: null, bag: null },
+  villager2:{ skin: [25, 38, 62], hair: [0, 0, 24], top: [275, 40, 52], pants: [220, 22, 28], hat: null, bag: null },
+  kid:      { skin: [28, 48, 78], hair: [40, 62, 46], top: [48, 72, 56], pants: [206, 40, 40], hat: null, bag: null, small: true },
+  trainer:  { skin: [26, 42, 70], hair: [210, 30, 24], top: [12, 62, 46], pants: [222, 26, 26], hat: [12, 62, 40], bag: [30, 40, 32] },
+  hiker:    { skin: [24, 40, 60], hair: [20, 35, 22], top: [36, 55, 44], pants: [110, 25, 30], hat: [36, 50, 34], bag: [20, 40, 28] },
+  swimmer:  { skin: [28, 50, 76], hair: [196, 50, 44], top: [192, 65, 52], pants: [192, 55, 40], hat: null, bag: null },
+  scholar:  { skin: [27, 40, 72], hair: [268, 30, 34], top: [268, 40, 52], pants: [230, 24, 28], hat: [268, 40, 40], bag: null },
+  rival:    { skin: [26, 44, 74], hair: [20, 75, 52], top: [150, 45, 40], pants: [222, 28, 28], hat: null, bag: [30, 45, 34] },
+  elder:    { skin: [28, 30, 70], hair: [0, 0, 88], top: [40, 30, 52], pants: [30, 20, 34], hat: null, bag: null },
+  guard:    { skin: [26, 40, 66], hair: [0, 0, 20], top: [220, 45, 34], pants: [220, 35, 24], hat: [220, 45, 28], bag: null },
+};
+
+const C = (c, dl = 0, a = 1) => hsl(c[0], c[1], clamp(c[2] + dl, 0, 96), a);
+
+/**
+ * @param dir  'down' | 'up' | 'left' | 'right'
+ * @param step  walk phase 0..1 (0 = idle stance)
+ */
+function drawActor(ctx, look, x, y, dir = 'down', step = 0, scale = 1, opts = {}) {
+  const L = typeof look === 'string' ? (LOOKS[look] || LOOKS.villager) : look;
+  const s = scale * (L.small ? 0.82 : 1);
+  const swing = Math.sin(step * Math.PI * 2);
+  const bob = Math.abs(Math.cos(step * Math.PI * 2)) * 1.3;
+
+  ctx.save();
+  // soft shadow
+  ctx.globalAlpha = 0.28;
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(x, y - 1, 13 * s, 5 * s, 0, 0, 7); ctx.fill();
+  ctx.globalAlpha = opts.alpha ?? 1;
+
+  ctx.translate(x, y - bob * s);
+  ctx.scale(s, s);
+
+  const side = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+  const back = dir === 'up';
+  const outline = 'rgba(20,16,32,.85)';
+  const lw = 1.8;
+
+  const stroke = () => { ctx.lineWidth = lw; ctx.strokeStyle = outline; ctx.lineJoin = 'round'; ctx.stroke(); };
+
+  // ---- legs
+  for (const sgn of [-1, 1]) {
+    const off = side ? sgn * swing * 5 : sgn * swing * 4;
+    const lx = side ? off : sgn * 4.5;
+    const ly = side ? 0 : 0;
+    ctx.beginPath();
+    ctx.roundRect(lx - 3.4, -15 + (side ? 0 : Math.abs(off) * -0.2), 6.8, 15, 3);
+    ctx.fillStyle = C(L.pants, sgn < 0 ? -6 : 0); ctx.fill(); stroke();
+    // shoe
+    ctx.beginPath(); ctx.roundRect(lx - 4.2, -3.4, 8.4, 4, 2);
+    ctx.fillStyle = C(L.pants, -16); ctx.fill(); stroke();
+  }
+
+  // ---- torso
+  ctx.beginPath();
+  ctx.roundRect(-8.5, -33, 17, 19, 5);
+  const tg = ctx.createLinearGradient(-9, -33, 9, -14);
+  tg.addColorStop(0, C(L.top, +12)); tg.addColorStop(1, C(L.top, -8));
+  ctx.fillStyle = tg; ctx.fill(); stroke();
+
+  // ---- arms
+  for (const sgn of [-1, 1]) {
+    const off = side ? -sgn * swing * 4 : sgn * swing * 3;
+    ctx.save();
+    ctx.translate(sgn * 9.6, -30);
+    ctx.rotate(-sgn * 0.12 + off * 0.05);
+    ctx.beginPath(); ctx.roundRect(-2.9, 0, 5.8, 14, 2.8);
+    ctx.fillStyle = C(L.top, sgn < 0 ? -10 : +4); ctx.fill(); stroke();
+    ctx.beginPath(); ctx.arc(0, 14.5, 3.1, 0, 7);
+    ctx.fillStyle = C(L.skin); ctx.fill(); stroke();
+    ctx.restore();
+  }
+
+  // ---- bag strap
+  if (L.bag && !back) {
+    ctx.beginPath();
+    ctx.moveTo(-7, -31); ctx.lineTo(5, -18);
+    ctx.lineWidth = 3; ctx.strokeStyle = C(L.bag, -8); ctx.stroke();
+  }
+  if (L.bag && back) {
+    ctx.beginPath(); ctx.roundRect(-7.5, -30, 15, 14, 4);
+    ctx.fillStyle = C(L.bag); ctx.fill(); stroke();
+  }
+
+  // ---- head
+  const hy = -41;
+  ctx.beginPath(); ctx.ellipse(side * 1.2, hy, 9.6, 10.2, 0, 0, 7);
+  const hg = ctx.createRadialGradient(side * 1.2 - 3, hy - 4, 1, side * 1.2, hy, 11);
+  hg.addColorStop(0, C(L.skin, +10)); hg.addColorStop(1, C(L.skin, -6));
+  ctx.fillStyle = hg; ctx.fill(); stroke();
+
+  // ---- hair
+  ctx.beginPath();
+  if (back) {
+    ctx.ellipse(0, hy - 0.5, 10.2, 10.6, 0, 0, 7);
+  } else if (side) {
+    ctx.ellipse(side * 0.4, hy - 2.6, 10.2, 8.4, 0, Math.PI, Math.PI * 2);
+    ctx.lineTo(-side * 9, hy + 4);
+    ctx.lineTo(-side * 10, hy - 3);
+  } else {
+    ctx.ellipse(0, hy - 3.2, 10.1, 8.2, 0, Math.PI, Math.PI * 2);
+    ctx.lineTo(9.5, hy + 1.5);
+    ctx.quadraticCurveTo(0, hy - 2.5, -9.5, hy + 1.5);
+  }
+  ctx.closePath();
+  ctx.fillStyle = C(L.hair); ctx.fill(); stroke();
+
+  // ---- hat
+  if (L.hat) {
+    ctx.beginPath();
+    ctx.ellipse(side * 0.6, hy - 5.5, 10.6, 6.2, 0, Math.PI, Math.PI * 2);
+    ctx.closePath();
+    ctx.fillStyle = C(L.hat); ctx.fill(); stroke();
+    if (!back) {
+      ctx.beginPath();
+      ctx.ellipse(side * 4.2, hy - 4.4, 8.4, 3, side ? 0.06 * side : 0, 0, Math.PI);
+      ctx.fillStyle = C(L.hat, -12); ctx.fill(); stroke();
+    }
+  }
+
+  // ---- face
+  if (!back) {
+    const ex = side ? side * 3.4 : 0;
+    for (const sgn of side ? [1] : [-1, 1]) {
+      const px = side ? ex + sgn * 0 : sgn * 3.6;
+      ctx.beginPath(); ctx.ellipse(px, hy + 1.4, 1.5, 1.9, 0, 0, 7);
+      ctx.fillStyle = '#221c33'; ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(side ? ex + side * 1.2 : 0, hy + 5.2, 2.6, 0.2, Math.PI - 0.2);
+    ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(60,30,40,.7)'; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Head-only portrait used by dialogue boxes. */
+function drawActorPortrait(ctx, look, x, y, size) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, size / 2, 0, 7); ctx.clip();
+  const L = typeof look === 'string' ? (LOOKS[look] || LOOKS.villager) : look;
+  const g = ctx.createLinearGradient(x - size / 2, y - size / 2, x + size / 2, y + size / 2);
+  g.addColorStop(0, hsl(L.top[0], 40, 30)); g.addColorStop(1, hsl(L.top[0], 45, 16));
+  ctx.fillStyle = g; ctx.fillRect(x - size, y - size, size * 2, size * 2);
+  drawActor(ctx, L, x, y + size * 0.95, 'down', 0, size / 42);
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(x, y, size / 2, 0, 7);
+  ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.stroke();
+}
+  return { LOOKS, drawActor, drawActorPortrait };
+})();
+
+/* ===== src3d/gfx/actor3d.js ===== */
+const __m_src3d_gfx_actor3d_js = (() => {
+  const { MeshBuilder } = __m_src3d_core_meshbuilder_js;
+  const { hsl2rgb } = __m_src3d_gfx_creature3d_js;
+  const { LOOKS } = __m_src_gfx_actor_js;
+// Chunky low-poly humanoid built from the same colour table the 2D sprites use.
+// Returned in parts so limbs can be animated independently.
+
+
+
+
+
+function buildActorMeshes(lookId) {
+  const L = LOOKS[lookId] || LOOKS.hero;
+  const skin = hsl2rgb(...L.skin);
+  const top = hsl2rgb(...L.top);
+  const pants = hsl2rgb(...L.pants);
+  const hair = hsl2rgb(...L.hair);
+  const hat = L.hat ? hsl2rgb(...L.hat) : null;
+  const bag = L.bag ? hsl2rgb(...L.bag) : null;
+
+  // ---- torso, head, hair, hat, bag
+  const body = new MeshBuilder();
+  body.push(); body.translate(0, 1.42, 0);
+  body.box(0.86, 1.0, 0.5, top, top);
+  body.pop();
+  body.push(); body.translate(0, 2.2, 0);
+  body.sphere(0.42, skin, 8, 6, 1.05);
+  body.push(); body.translate(0, 0.12, -0.02);
+  body.sphere(0.44, hair, 8, 5, 0.78);
+  body.pop();
+  // eyes
+  for (const s of [-1, 1]) {
+    body.push(); body.translate(s * 0.16, 0.02, 0.36);
+    body.sphere(0.07, [0.08, 0.07, 0.12], 5, 4);
+    body.pop();
+  }
+  if (hat) {
+    body.push(); body.translate(0, 0.34, 0);
+    body.taper(0.46, 0.34, 0.26, hat, 8);
+    body.translate(0, -0.02, 0.12);
+    body.push(); body.rotateX(-0.1);
+    body.box(0.62, 0.06, 0.52, hat);
+    body.pop();
+    body.pop();
+  }
+  body.pop();
+  if (bag) {
+    body.push(); body.translate(0, 1.6, -0.34);
+    body.box(0.6, 0.6, 0.28, bag);
+    body.pop();
+  }
+
+  // ---- one arm and one leg, drawn twice with mirrored transforms
+  const arm = new MeshBuilder();
+  arm.push(); arm.translate(0, -0.34, 0);
+  arm.box(0.24, 0.7, 0.24, top);
+  arm.translate(0, -0.42, 0);
+  arm.sphere(0.16, skin, 6, 4);
+  arm.pop();
+
+  const leg = new MeshBuilder();
+  leg.push(); leg.translate(0, -0.4, 0);
+  leg.box(0.28, 0.82, 0.28, pants);
+  leg.translate(0, -0.46, 0.06);
+  leg.box(0.32, 0.16, 0.48, hsl2rgb(L.pants[0], L.pants[1], Math.max(8, L.pants[2] - 14)));
+  leg.pop();
+
+  return { body: body.data(), arm: arm.data(), leg: leg.data() };
+}
+
+/** Flat disc used as a soft contact shadow under anything that stands up. */
+function buildShadowMesh(radius = 1) {
+  const m = new MeshBuilder();
+  const seg = 12;
+  const c = [0, 0, 0];
+  for (let i = 0; i < seg; i++) {
+    const a0 = (i / seg) * 6.28, a1 = ((i + 1) / seg) * 6.28;
+    m.tri(0, 0, 0,
+      Math.cos(a1) * radius, 0, Math.sin(a1) * radius,
+      Math.cos(a0) * radius, 0, Math.sin(a0) * radius, c);
+  }
+  return m.data();
+}
+  return { buildActorMeshes, buildShadowMesh };
+})();
+
+/* ===== src/data/maps.js ===== */
+const __m_src_data_maps_js = (() => {
+// The world.  Maps are ASCII grids (see world/tiles.js for the legend) plus
+// warps, NPCs, encounter tables and ground items.
+
+const HOUSE_ROWS = [
+  'HHHHHHHHHHHH',
+  'HBffffffffPH',
+  'HffffffffffH',
+  'HffxfffffffH',
+  'HffffffffffH',
+  'HffffffffffH',
+  'HffffffffffH',
+  'HHHHHdHHHHHH',
+  'HHHHHHHHHHHH',
+];
+
+const MAPS = {
+  // ======================================================= VERDANT HOLLOW ==
+  verdant_hollow: {
+    name: 'עמק הירוק',
+    music: 'town',
+    outdoor: true,
+    rows: [
+      '##############=###############',
+      '#.............==.............#',
+      '#..*..........==..........*..#',
+      '#....HHHHHH...==...HHHHHH....#',
+      '#....HHHHHH...==...HHHHHH....#',
+      '#....HHDHHH...==...HHHDHH....#',
+      '#......==.....==.....==......#',
+      '#......================......#',
+      '#......==.....==.....==......#',
+      '#..*...==.....==.....==...*..#',
+      '#......==.....==.....==......#',
+      '#...HHHHHH....==....HHHHHH...#',
+      '#...HHHHHH....==....HHHHHH...#',
+      '#...HHHDHH....==....HHHHHH...#',
+      '#......==.....==.....==......#',
+      '#......================......#',
+      '#......==.....==.....==......#',
+      '#.,,,,,==.....==.....==,,,,,.#',
+      '#.,,,,,==.....S=.....==,,,,,.#',
+      '#.,,,,,==......=.....==......#',
+      '#......==......=.....==...%%.#',
+      '##############################',
+    ],
+    buildings: [
+      { x: 5, y: 3, w: 6, h: 3, roof: 208, wall: 38, door: 7, label: 'הבית שלי' },
+      { x: 19, y: 3, w: 6, h: 3, roof: 168, wall: 40, door: 22, label: 'מעבדת פרופ׳ אלון' },
+      { x: 4, y: 11, w: 6, h: 3, roof: 26, wall: 36, door: 7 },
+      { x: 20, y: 11, w: 6, h: 3, roof: 300, wall: 34 },
+    ],
+    warps: [
+      { x: 14, y: 0, to: 'route1', tx: 12, ty: 28, dir: 'up' },
+      { x: 7, y: 5, to: 'home', tx: 5, ty: 6, dir: 'up' },
+      { x: 22, y: 5, to: 'lab', tx: 6, ty: 8, dir: 'up' },
+      { x: 7, y: 13, to: 'house_a', tx: 5, ty: 6, dir: 'up' },
+    ],
+    signs: [
+      { x: 14, y: 18, text: 'עמק הירוק — "מקום שבו כל מסע מתחיל בצעד קטן".' },
+    ],
+    encounters: {
+      grass: [
+        { species: 'nibbly', min: 2, max: 4, weight: 6 },
+        { species: 'wingle', min: 2, max: 4, weight: 4 },
+      ],
+    },
+    npcs: [
+      {
+        id: 'gate_guard', x: 14, y: 1, dir: 'down', look: 'guard', name: 'שומר השער',
+        blockUntil: 'gotStarter',
+        lines: ['הדרך צפונה מלאה ביצורי בר.', 'אל תצא מכאן בלי בן־לוויה! לך לפרופ׳ אלון במעבדה.'],
+        linesAfter: ['בהצלחה במסע! שמור על הצוות שלך.'],
+      },
+      {
+        id: 'mom', x: 11, y: 9, dir: 'down', look: 'heroine', name: 'שכנה',
+        move: 'lookaround',
+        lines: ['הפרופסור אלון חיפש אותך.', 'הוא במעבדה, הבניין עם הגג הירוק.'],
+      },
+      {
+        id: 'kid1', x: 20, y: 17, dir: 'left', look: 'kid', name: 'ילד',
+        move: 'wander',
+        lines: ['בדשא הגבוה מסתתרים יצורים!', 'אם אין לך צוות, עדיף לעקוף אותו.'],
+      },
+      {
+        id: 'elder1', x: 5, y: 8, dir: 'right', look: 'elder', name: 'זקן הכפר',
+        lines: ['פעם, כשהייתי צעיר, טיפסתי עד לפסגה.',
+                'אומרים שמשהו זוהר חי שם למעלה… אבל מי מאמין לזקנים.'],
+      },
+    ],
+    items: [
+      { x: 27, y: 20, item: 'potion', flag: 'item_vh_1' },
+    ],
+  },
+
+  // ================================================================ HOME ==
+  home: {
+    name: 'הבית שלי', music: 'town', indoor: true,
+    rows: HOUSE_ROWS,
+    warps: [{ x: 5, y: 7, to: 'verdant_hollow', tx: 7, ty: 6, dir: 'down' }],
+    npcs: [
+      {
+        id: 'mother', x: 8, y: 3, dir: 'down', look: 'heroine', name: 'אמא',
+        lines: ['בוקר טוב! היום המסע שלך מתחיל.',
+                'הפרופסור אלון חיכה לך כל הבוקר. אל תאחר!'],
+        give: { item: 'boots', count: 1 }, giveFlag: 'gotBoots',
+        linesGive: ['רגע — שכחת את מגפי הריצה שלך.',
+                    'החזק Shift כדי לרוץ. עכשיו לך, ובהצלחה!'],
+        linesAfter: ['היצור שלך נראה מאושר לצידך. תשמור עליו.'],
+        afterFlag: 'gotStarter',
+        healParty: true,
+      },
+    ],
+  },
+
+  house_a: {
+    name: 'בית בעמק', music: 'town', indoor: true,
+    rows: HOUSE_ROWS,
+    warps: [{ x: 5, y: 7, to: 'verdant_hollow', tx: 7, ty: 14, dir: 'down' }],
+    npcs: [
+      {
+        id: 'collector', x: 3, y: 4, dir: 'right', look: 'scholar', name: 'אספן',
+        lines: ['כל יצור שייך לאחד משלושה־עשר טיפוסים.',
+                'להבה חזקה מול צומח, מים חזקים מול להבה, וצומח מול מים.',
+                'אם תזכור רק את זה — כבר תנצח בהרבה קרבות.'],
+      },
+      {
+        id: 'gift_guy', x: 8, y: 5, dir: 'left', look: 'villager2', name: 'שכן',
+        lines: ['קח, יש לי עודף. אולי יעזור לך בדרך.'],
+        give: { item: 'potion', count: 3 }, giveFlag: 'gift_potions',
+        linesAfter: ['תשתמש בהם בחוכמה!'],
+      },
+    ],
+  },
+
+  // ================================================================= LAB ==
+  lab: {
+    name: 'מעבדת פרופ׳ אלון', music: 'town', indoor: true,
+    rows: [
+      'HHHHHHHHHHHHHH',
+      'HBBBffffBBBBBH',
+      'HffffffffffffH',
+      'HffPffffffPffH',
+      'HffffffffffffH',
+      'HffxffffffxffH',
+      'HffffffffffffH',
+      'HffffffffffffH',
+      'HffffffffffffH',
+      'HHHHHHdHHHHHHH',
+      'HHHHHHHHHHHHHH',
+    ],
+    warps: [{ x: 6, y: 9, to: 'verdant_hollow', tx: 22, ty: 6, dir: 'down' }],
+    npcs: [
+      {
+        id: 'prof', x: 6, y: 2, dir: 'down', look: 'prof', name: 'פרופ׳ אלון',
+        starter: true,
+        lines: ['אה, סוף סוף הגעת!', 'שלושה יצורים צעירים מחכים כאן לבן־לוויה.',
+                'בחר את זה שמדבר אל הלב שלך.'],
+        linesAfter: ['הבחירה שלך הייתה מצוינת. צא לדרך, והשלם את הקטלוג!'],
+        afterFlag: 'gotStarter',
+      },
+      {
+        id: 'aide', x: 10, y: 6, dir: 'left', look: 'clerk', name: 'עוזר מעבדה',
+        lines: ['שיקויים מרפאים נקודות חיים.',
+                'ספֵרות לוכדות יצורי בר — אבל רק אם החלשת אותם קודם.'],
+        give: { item: 'ball', count: 5 }, giveFlag: 'gotBalls', giveNeeds: 'gotStarter',
+        linesGive: ['קח חמש ספֵרות מהמלאי שלנו. לך תתפוס משהו!'],
+      },
+      {
+        id: 'rival', x: 4, y: 6, dir: 'right', look: 'rival', name: 'יונתן',
+        rival: true, needs: 'gotStarter', flag: 'rival1',
+        lines: ['אז גם אתה קיבלת אחד? מעולה.', 'בוא נראה מי מאמן טוב יותר!'],
+        trainer: { intro: 'יונתן: אני לא אתן לך יתרון!', defeat: 'יונתן: לא רע… בפעם הבאה אנצח.',
+                   reward: 300, dynamicTeam: 'rivalStarter' },
+        linesAfter: ['יונתן: אני הולך להתאמן. ניפגש בסטונברוק!'],
+      },
+    ],
+  },
+
+  // ============================================================== ROUTE 1 ==
+  route1: {
+    name: 'נתיב 1', music: 'route', outdoor: true,
+    rows: [
+      '############=#############',
+      '#..........,==,..........#',
+      '#..###.....,==,.....###..#',
+      '#..###......==......###..#',
+      '#...........==...........#',
+      '#..,,,,.....==.....,,,,..#',
+      '#..,,,,.....==.....,,,,..#',
+      '#..,,,,.....==.....,,,,..#',
+      '#...........==...........#',
+      '#.###.......==.......###.#',
+      '#.###.......==.......###.#',
+      '#...........==...........#',
+      '#....~~~~...==...........#',
+      '#....~~~~...==....S......#',
+      '#....~~~~...==...........#',
+      '#...........==...........#',
+      '#-----------==-----------#',
+      '#...........==...........#',
+      '#..,,,,,....==....,,,,,..#',
+      '#..,,,,,....==....,,,,,..#',
+      '#..,,,,,....==....,,,,,..#',
+      '#...........==...........#',
+      '#..##.......==.......##..#',
+      '#..##.......==.......##..#',
+      '#...........==...........#',
+      '#....,,,....==....,,,....#',
+      '#....,,,....==....,,,....#',
+      '#...........==...........#',
+      '#...........==...........#',
+      '############=#############',
+    ],
+    warps: [
+      { x: 12, y: 29, to: 'verdant_hollow', tx: 14, ty: 1, dir: 'down' },
+      { x: 12, y: 0, to: 'stonebrook', tx: 7, ty: 20, dir: 'up' },
+    ],
+    signs: [
+      { x: 18, y: 13, text: 'נתיב 1 — צפונה: סטונברוק. דרומה: עמק הירוק.\nזהירות: מדרון חד־כיווני לפניך.' },
+    ],
+    encounters: {
+      grass: [
+        { species: 'nibbly', min: 3, max: 6, weight: 6 },
+        { species: 'wingle', min: 3, max: 6, weight: 5 },
+        { species: 'buzzlet', min: 3, max: 6, weight: 4 },
+        { species: 'voltpup', min: 4, max: 7, weight: 2 },
+        { species: 'rockle', min: 4, max: 7, weight: 2 },
+        { species: 'frostkit', min: 4, max: 7, weight: 1 },
+      ],
+    },
+    npcs: [
+      {
+        id: 't_r1_a', x: 6, y: 21, dir: 'right', look: 'kid', name: 'טירון מיה',
+        sight: 4, flag: 'trainer_r1_a',
+        trainer: {
+          intro: 'מיה: הצוות שלי קטן אבל נחוש!',
+          defeat: 'מיה: אוףף! הייתי צריכה להתאמן יותר.',
+          reward: 180,
+          team: [{ species: 'nibbly', level: 5 }, { species: 'wingle', level: 6 }],
+        },
+        linesAfter: ['מיה: הדשא הגבוה מסתיר הפתעות. שמור על שיקויים!'],
+      },
+      {
+        id: 't_r1_b', x: 18, y: 8, dir: 'left', look: 'hiker', name: 'מטייל בועז',
+        sight: 4, flag: 'trainer_r1_b',
+        trainer: {
+          intro: 'בועז: הסלעים כאן קשים — וגם היצורים שלי.',
+          defeat: 'בועז: קשה כמו סלע, אבל אתה קשה יותר.',
+          reward: 260,
+          team: [{ species: 'rockle', level: 7 }, { species: 'nibbly', level: 6 }],
+        },
+        linesAfter: ['בועז: מהלכים מסוג מים וצומח מרסקים סלעים.'],
+      },
+      {
+        id: 'r1_hint', x: 20, y: 17, dir: 'down', look: 'villager', name: 'עוברת אורח',
+        lines: ['מדרון כזה אפשר לקפוץ רק כלפי מטה.', 'קיצור דרך נחמד בדרך חזרה הביתה.'],
+      },
+    ],
+    items: [
+      { x: 4, y: 24, item: 'ball', flag: 'item_r1_1' },
+      { x: 21, y: 4, item: 'potion', flag: 'item_r1_2' },
+    ],
+  },
+
+  // =========================================================== STONEBROOK ==
+  stonebrook: {
+    name: 'סטונברוק', music: 'town', outdoor: true,
+    rows: [
+      '##############=###############',
+      '#.............==.............#',
+      '#...HHHHHHH...==...HHHHHHH...#',
+      '#...HHHHHHH...==...HHHHHHH...#',
+      '#...HHHDHHH...==...HHHDHHH...#',
+      '#......==.....==.....==......#',
+      '#......===============.......#',
+      '#......==.....==.....==......#',
+      '#..*...==.....==.....==...*..#',
+      '#......==.....==.....==......#',
+      '#..HHHHHHHH...==...HHHHHHHH..#',
+      '#..HHHHHHHH...==...HHHHHHHH..#',
+      '#..HHHHDHHH...==...HHHDHHHH..#',
+      '#......==.....==.....==......#',
+      '#......================......#',
+      '#......==.....==.....==......#',
+      '#..S...==.....==.....==......#',
+      '#.,,,,.==.....==.....==,,,,,.#',
+      '#.,,,,.==.....==.....==,,,,,.#',
+      '#......==.....==.....==......#',
+      '#......==.....==.....==...%%.#',
+      '#######=######################',
+    ],
+    buildings: [
+      { x: 4, y: 2, w: 7, h: 3, roof: 340, wall: 96, door: 7, label: 'מרכז שיקום' },
+      { x: 19, y: 2, w: 7, h: 3, roof: 202, wall: 92, door: 22, label: 'חנות' },
+      { x: 3, y: 10, w: 8, h: 3, roof: 46, wall: 40, door: 7, label: 'אולם המבחן' },
+      { x: 19, y: 10, w: 8, h: 3, roof: 262, wall: 36, door: 22 },
+    ],
+    warps: [
+      { x: 7, y: 21, to: 'route1', tx: 12, ty: 1, dir: 'down' },
+      { x: 14, y: 0, to: 'cave', tx: 12, ty: 22, dir: 'up' },
+      { x: 7, y: 4, to: 'center', tx: 6, ty: 8, dir: 'up' },
+      { x: 22, y: 4, to: 'shop', tx: 5, ty: 7, dir: 'up' },
+      { x: 7, y: 12, to: 'hall', tx: 7, ty: 11, dir: 'up' },
+      { x: 22, y: 12, to: 'house_b', tx: 5, ty: 6, dir: 'up' },
+    ],
+    signs: [
+      { x: 3, y: 16, text: 'סטונברוק — עיר האבן והמבחן.\nמצפון: מערת ההד.' },
+    ],
+    encounters: {
+      grass: [
+        { species: 'nibbly', min: 6, max: 9, weight: 5 },
+        { species: 'buzzlet', min: 6, max: 9, weight: 4 },
+        { species: 'voltpup', min: 7, max: 10, weight: 3 },
+      ],
+    },
+    npcs: [
+      {
+        id: 'cave_guard', x: 14, y: 1, dir: 'down', look: 'guard', name: 'שומר המערה',
+        blockUntil: 'badge1',
+        lines: ['מערת ההד מסוכנת מדי לחסרי ניסיון.',
+                'קודם נצח באולם המבחן — אז אתן לך לעבור.'],
+        linesAfter: ['הוכחת את עצמך. הדרך צפונה פתוחה.'],
+      },
+      {
+        id: 'sb_kid', x: 12, y: 8, dir: 'down', look: 'kid', name: 'ילדה',
+        move: 'wander',
+        lines: ['אמרו לי שמנהיגת האולם משתמשת רק ביצורי סלע ומתכת.',
+                'אולי כדאי לך יצור מסוג מים או צומח?'],
+      },
+      {
+        id: 'sb_villager', x: 25, y: 8, dir: 'left', look: 'villager2', name: 'תושב',
+        lines: ['במרכז השיקום מטפלים בצוות שלך בחינם.', 'שם גם אפשר לשמור את המסע.'],
+      },
+    ],
+    items: [{ x: 27, y: 19, item: 'superpotion', flag: 'item_sb_1' }],
+  },
+
+  center: {
+    name: 'מרכז שיקום', music: 'center', indoor: true,
+    rows: [
+      'HHHHHHHHHHHHHH',
+      'HBBBBMMBBBBBBH',
+      'HttttttttttttH',
+      'HttCCCCttPPttH',
+      'HttttttttttttH',
+      'HttccccttccttH',
+      'HttccccttccttH',
+      'HttttttttttttH',
+      'HttttttttttttH',
+      'HHHHHHdHHHHHHH',
+      'HHHHHHHHHHHHHH',
+    ],
+    warps: [{ x: 6, y: 9, to: 'stonebrook', tx: 7, ty: 5, dir: 'down' }],
+    npcs: [
+      {
+        id: 'nurse', x: 4, y: 2, dir: 'down', look: 'nurse', name: 'אחות',
+        heal: true,
+        lines: ['ברוך הבא למרכז השיקום! שנטפל בצוות שלך?'],
+      },
+      {
+        id: 'saver', x: 10, y: 4, dir: 'left', look: 'clerk', name: 'פקיד רישום',
+        save: true,
+        lines: ['לרשום את ההתקדמות שלך ביומן המסע?'],
+      },
+      {
+        id: 'center_guest', x: 3, y: 6, dir: 'right', look: 'swimmer', name: 'שחיין',
+        lines: ['יצור מעולף לא צובר ניסיון.', 'החלף אותו לפני שהוא נופל — ככה כולם מתחזקים.'],
+      },
+    ],
+  },
+
+  shop: {
+    name: 'חנות', music: 'center', indoor: true,
+    rows: [
+      'HHHHHHHHHHHH',
+      'HBBBBBBBBBBH',
+      'HffffffffffH',
+      'HffCCCCCCffH',
+      'HffffffffffH',
+      'HffffffffffH',
+      'HffffffffffH',
+      'HffffffffffH',
+      'HHHHHdHHHHHH',
+      'HHHHHHHHHHHH',
+    ],
+    warps: [{ x: 5, y: 8, to: 'stonebrook', tx: 22, ty: 5, dir: 'down' }],
+    npcs: [
+      {
+        id: 'clerk', x: 4, y: 2, dir: 'down', look: 'clerk', name: 'מוכר',
+        shop: true,
+        lines: ['ברוך הבא! מה תרצה לקנות?'],
+      },
+      {
+        id: 'shopper', x: 9, y: 6, dir: 'left', look: 'villager', name: 'קונה',
+        lines: ['ספֵרה כפולה תופסת הרבה יותר טוב מספֵרה רגילה.',
+                'שווה את ההפרש במחיר.'],
+      },
+    ],
+  },
+
+  house_b: {
+    name: 'בית בסטונברוק', music: 'town', indoor: true,
+    rows: HOUSE_ROWS,
+    warps: [{ x: 5, y: 7, to: 'stonebrook', tx: 22, ty: 13, dir: 'down' }],
+    npcs: [
+      {
+        id: 'hb_sage', x: 3, y: 4, dir: 'right', look: 'scholar', name: 'חוקרת',
+        lines: ['יצורים רבים משנים צורה כשהם מתחזקים מספיק.',
+                'זה קורה מעצמו — פשוט המשך לאמן אותם.'],
+      },
+      {
+        id: 'hb_gift', x: 8, y: 5, dir: 'left', look: 'elder', name: 'סבתא',
+        lines: ['הדרך צפונה קרה וחשוכה. קח את זה.'],
+        give: { item: 'greatball', count: 2 }, giveFlag: 'gift_greatballs',
+        linesAfter: ['תיזהר במערה, ילד.'],
+      },
+    ],
+  },
+
+  hall: {
+    name: 'אולם המבחן', music: 'battle', indoor: true,
+    rows: [
+      'HHHHHHHHHHHHHHH',
+      'HtttttttttttttH',
+      'HttttcccccttttH',
+      'HttttcccccttttH',
+      'HtttttttttttttH',
+      'HtxtttttttttxtH',
+      'HtttttttttttttH',
+      'HttttcccccttttH',
+      'HtttttttttttttH',
+      'HtxtttttttttxtH',
+      'HtttttttttttttH',
+      'HttttcccccttttH',
+      'HHHHHHHdHHHHHHH',
+      'HHHHHHHHHHHHHHH',
+    ],
+    warps: [{ x: 7, y: 12, to: 'stonebrook', tx: 7, ty: 13, dir: 'down' }],
+    npcs: [
+      {
+        id: 'hall_a', x: 3, y: 8, dir: 'right', look: 'trainer', name: 'מתמודד ניר',
+        sight: 3, flag: 'trainer_hall_a',
+        trainer: {
+          intro: 'ניר: לא עוברים אותי בקלות!',
+          defeat: 'ניר: אתה באמת מוכן למנהיגה.',
+          reward: 400,
+          team: [{ species: 'rockle', level: 11 }, { species: 'cogling', level: 12 }],
+        },
+        linesAfter: ['ניר: תשמור על יצור מסוג מים לקרב הבא.'],
+      },
+      {
+        id: 'hall_b', x: 11, y: 5, dir: 'left', look: 'hiker', name: 'מתמודדת שיר',
+        sight: 3, flag: 'trainer_hall_b',
+        trainer: {
+          intro: 'שיר: ההגנה שלי כמו חומה.',
+          defeat: 'שיר: החומה נבקעה…',
+          reward: 400,
+          team: [{ species: 'sandclaw', level: 12 }, { species: 'rockle', level: 12 }],
+        },
+        linesAfter: ['שיר: מהלכים מיוחדים עוברים דרך הגנה גבוהה.'],
+      },
+      {
+        id: 'leader', x: 7, y: 2, dir: 'down', look: 'guard', name: 'מנהיגת האולם דנה',
+        leader: true, flag: 'badge1',
+        lines: ['דנה: אני דנה, מנהיגת אולם המבחן.',
+                'הצוות שלי בנוי מאבן ומתכת. תראה לי שאתה יכול לשבור אותו.'],
+        trainer: {
+          intro: 'דנה: שנתחיל?',
+          defeat: 'דנה: יפה מאוד. עברת את המבחן.',
+          reward: 1200,
+          team: [
+            { species: 'rockle', level: 13 },
+            { species: 'sandclaw', level: 14 },
+            { species: 'boulderon', level: 16 },
+          ],
+        },
+        linesAfter: ['דנה: השומר בצפון כבר יודע. הדרך למערת ההד פתוחה בפניך.'],
+        award: { flag: 'badge1', item: 'superpotion', count: 2 },
+      },
+    ],
+  },
+
+  // ============================================================== CAVE ====
+  cave: {
+    name: 'מערת ההד', music: 'cave', cave: true,
+    rows: [
+      '^^^^^^^^^^^^r^^^^^^^^^^^^^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;^^^;;;;;rr;;;;;^^^;;;^',
+      '^;;;^^^;;;;;rr;;;;;^^^;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^^^^^;;;^^^^rr^^^^;;;^^^^^',
+      '^;;;;;;;^^^^rr^^^^;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;O;;;;;;;;rr;;;;;;;;O;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^^^^;;;;;;;;rr;;;;;;;;^^^^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;^^^^^;rr;^^^^^;;;;;^',
+      '^;;;;;^^^^^;rr;^^^^^;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^^^^^^^;;;;;rr;;;;;^^^^^^^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;^^^;;;;;rr;;;;;^^^;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^^^^^^^^^^^^r^^^^^^^^^^^^^',
+    ],
+    warps: [
+      { x: 12, y: 23, to: 'stonebrook', tx: 14, ty: 1, dir: 'down' },
+      { x: 12, y: 0, to: 'route2', tx: 14, ty: 18, dir: 'up' },
+    ],
+    encounters: {
+      cave: [
+        { species: 'rockle', min: 10, max: 14, weight: 5 },
+        { species: 'cogling', min: 10, max: 14, weight: 4 },
+        { species: 'shadewisp', min: 11, max: 15, weight: 4 },
+        { species: 'sandclaw', min: 11, max: 15, weight: 3 },
+        { species: 'magmite', min: 12, max: 16, weight: 2 },
+        { species: 'gloomoth', min: 12, max: 16, weight: 1 },
+      ],
+    },
+    npcs: [
+      {
+        id: 't_cave_a', x: 5, y: 12, dir: 'right', look: 'hiker', name: 'כורה עידו',
+        sight: 4, flag: 'trainer_cave_a',
+        trainer: {
+          intro: 'עידו: אף אחד לא עובר במנהרה שלי בחינם.',
+          defeat: 'עידו: קח, הרווחת את זה.',
+          reward: 620,
+          team: [{ species: 'boulderon', level: 16 }, { species: 'magmite', level: 16 }],
+        },
+        linesAfter: ['עידו: בצפון יש נתיב פתוח. תיזהר מהסופות.'],
+      },
+      {
+        id: 't_cave_b', x: 19, y: 18, dir: 'left', look: 'scholar', name: 'חוקר רן',
+        sight: 4, flag: 'trainer_cave_b',
+        trainer: {
+          intro: 'רן: אני חוקר יצורי צל. בוא נאסוף נתונים!',
+          defeat: 'רן: נתונים מרתקים. תודה על הקרב.',
+          reward: 640,
+          team: [{ species: 'shadewisp', level: 15 }, { species: 'gloomoth', level: 17 }],
+        },
+        linesAfter: ['רן: יצורי צל חלשים מול אור. תזכור את זה בפסגה.'],
+      },
+    ],
+    items: [
+      { x: 3, y: 5, item: 'revive', flag: 'item_cave_1' },
+      { x: 22, y: 15, item: 'greatball', flag: 'item_cave_2' },
+      { x: 8, y: 21, item: 'hyperpotion', flag: 'item_cave_3' },
+    ],
+  },
+
+  // ============================================================= ROUTE 2 ==
+  route2: {
+    name: 'נתיב 2', music: 'route', outdoor: true,
+    rows: [
+      '##############=###############',
+      '#.............==.............#',
+      '#..,,,,,......==......,,,,,..#',
+      '#..,,,,,......==......,,,,,..#',
+      '#..,,,,,......==......,,,,,..#',
+      '#.............==.............#',
+      '#...####......==......####...#',
+      '#...####......==......####...#',
+      '#.............==.............#',
+      '#......=================.....#',
+      '#......==.....==......==.....#',
+      '#..,,,,==.....==......==,,,..#',
+      '#..,,,,==.....==......==,,,..#',
+      '#......==.....==......==.....#',
+      '#...S..==.....==......==.....#',
+      '#......==.....==......==.....#',
+      '#~~~~..==.....==......==..~~~#',
+      '#~~~~..==.....==......==..~~~#',
+      '#......==.....==......==.....#',
+      '##############=###############',
+    ],
+    warps: [
+      { x: 14, y: 19, to: 'cave', tx: 12, ty: 22, dir: 'down' },
+      { x: 14, y: 0, to: 'summit', tx: 10, ty: 16, dir: 'up' },
+    ],
+    signs: [
+      { x: 4, y: 14, text: 'נתיב 2 — צפונה: פסגת האורות.\nרק מאמנים מנוסים ממשיכים מכאן.' },
+    ],
+    encounters: {
+      grass: [
+        { species: 'chompadge', min: 16, max: 20, weight: 4 },
+        { species: 'skytalon', min: 16, max: 20, weight: 4 },
+        { species: 'brawlkin', min: 16, max: 20, weight: 3 },
+        { species: 'slimeel', min: 16, max: 20, weight: 3 },
+        { species: 'terrapod', min: 17, max: 21, weight: 2 },
+        { species: 'puffbloom', min: 17, max: 21, weight: 2 },
+        { species: 'coralux', min: 18, max: 22, weight: 1 },
+      ],
+    },
+    npcs: [
+      {
+        id: 't_r2_a', x: 10, y: 4, dir: 'right', look: 'trainer', name: 'מאמנת אורית',
+        sight: 5, flag: 'trainer_r2_a',
+        trainer: {
+          intro: 'אורית: הגעת רחוק. נראה כמה רחוק.',
+          defeat: 'אורית: מרשים. הפסגה מחכה לך.',
+          reward: 900,
+          team: [{ species: 'arcfang', level: 20 }, { species: 'nectrix', level: 20 }],
+        },
+        linesAfter: ['אורית: בפסגה מרחף משהו שאף אחד לא הצליח לתפוס.'],
+      },
+      {
+        id: 't_r2_b', x: 25, y: 12, dir: 'left', look: 'swimmer', name: 'שחיינית טל',
+        sight: 4, flag: 'trainer_r2_b',
+        trainer: {
+          intro: 'טל: בואו נעשה גלים!',
+          defeat: 'טל: הגל שלך היה גדול יותר.',
+          reward: 860,
+          team: [{ species: 'marisel', level: 19 }, { species: 'slimeel', level: 20 }],
+        },
+        linesAfter: ['טל: שיקוי היפר בכיס שווה יותר מכל טקטיקה.'],
+      },
+    ],
+    items: [
+      { x: 4, y: 3, item: 'ultraball', flag: 'item_r2_1' },
+      { x: 27, y: 4, item: 'ether', flag: 'item_r2_2' },
+    ],
+  },
+
+  // ============================================================== SUMMIT ==
+  summit: {
+    name: 'פסגת האורות', music: 'cave', outdoor: true,
+    rows: [
+      '^^^^^^^^^^^^^^^^^^^^^^',
+      '^....................^',
+      '^...^^^^......^^^^...^',
+      '^...^^^^......^^^^...^',
+      '^....................^',
+      '^......,,,,,,,,......^',
+      '^......,,,,,,,,......^',
+      '^......,,,,,,,,......^',
+      '^....................^',
+      '^..^^....^^^^....^^..^',
+      '^..^^....^^^^....^^..^',
+      '^....................^',
+      '^.......,,,,,,.......^',
+      '^.......,,,,,,.......^',
+      '^....................^',
+      '^........====........^',
+      '^........====........^',
+      '^^^^^^^^^^=^^^^^^^^^^^',
+    ],
+    warps: [{ x: 10, y: 17, to: 'route2', tx: 14, ty: 1, dir: 'down' }],
+    encounters: {
+      grass: [
+        { species: 'gloomoth', min: 22, max: 26, weight: 4 },
+        { species: 'terrapod', min: 22, max: 26, weight: 3 },
+        { species: 'nectrix', min: 23, max: 27, weight: 3 },
+        { species: 'glacierra', min: 24, max: 28, weight: 2 },
+        { species: 'stormcrest', min: 25, max: 29, weight: 1 },
+      ],
+    },
+    npcs: [
+      {
+        id: 'apex', x: 10, y: 3, dir: 'down', look: 'elder', name: 'איתריון',
+        staticBattle: { species: 'aetherion', level: 30 }, flag: 'apex_done',
+        hidden: true, orb: true,
+        lines: ['אור עז מרחף מעל הסלע…'],
+        linesAfter: ['הרוח בפסגה שקטה עכשיו.'],
+      },
+      {
+        id: 'summit_sage', x: 4, y: 14, dir: 'right', look: 'elder', name: 'נזיר הפסגה',
+        lines: ['הגעת עד לכאן. מעטים מגיעים.',
+                'מעל הסלע השחור מרחף איתריון — לב הסופה.',
+                'החלש אותו היטב לפני שתנסה ללכוד. ספֵרת עילית לא תזיק.'],
+      },
+    ],
+    items: [{ x: 19, y: 12, item: 'ultraball', flag: 'item_summit_1' }],
+  },
+};
+
+const START = { map: 'home', x: 5, y: 5, dir: 'down' };
+  return { MAPS, START };
+})();
+
+/* ===== src/world/tilemap.js ===== */
+const __m_src_world_tilemap_js = (() => {
+  const { MAPS } = __m_src_data_maps_js;
+  const { TILE, tileInfo } = __m_src_world_tiles_js;
+  const { pickWeighted } = __m_src_core_util_js;
+// Runtime view over a map definition: collision, warps, encounter lookup and
+// the y-sorted draw list the overworld renderer consumes.
+
+
+
+
+
+class TileMap {
+  constructor(id) {
+    const def = MAPS[id];
+    if (!def) throw new Error('unknown map ' + id);
+    this.id = id;
+    this.def = def;
+    this.rows = def.rows;
+    this.w = def.rows[0].length;
+    this.h = def.rows.length;
+    this.name = def.name;
+    this.buildings = def.buildings || [];
+    this.warps = def.warps || [];
+    this.signs = def.signs || [];
+  }
+
+  char(x, y) {
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return ' ';
+    return this.rows[y][x];
+  }
+
+  info(x, y) { return tileInfo(this.char(x, y)); }
+
+  solid(x, y) { return !!this.info(x, y).solid; }
+
+  ledgeAt(x, y) { return this.info(x, y).ledge || null; }
+
+  warpAt(x, y) { return this.warps.find((w) => w.x === x && w.y === y) || null; }
+
+  signAt(x, y) { return this.signs.find((s) => s.x === x && s.y === y) || null; }
+
+  /** Encounter table entry for the tile the player is standing on, if any. */
+  rollEncounter(x, y) {
+    const kind = this.info(x, y).enc;
+    if (!kind) return null;
+    const table = this.def.encounters?.[kind];
+    if (!table || !table.length) return null;
+    return pickWeighted(table);
+  }
+
+  get pixelW() { return this.w * TILE; }
+  get pixelH() { return this.h * TILE; }
+}
+  return { TileMap };
+})();
+
+/* ===== src/data/types.js ===== */
+const __m_src_data_types_js = (() => {
+// Elemental types. Original set — same spirit as the classics, own names/colours.
+
+const TYPES = {
+  neutral: { name: 'ניטרלי',  en: 'Neutral', hue: 42,  color: '#b6ae9a' },
+  ember:   { name: 'להבה',    en: 'Ember',   hue: 14,  color: '#f0653c' },
+  aqua:    { name: 'מים',     en: 'Aqua',    hue: 205, color: '#4aa7f0' },
+  verdant: { name: 'צומח',    en: 'Verdant', hue: 120, color: '#5cc25c' },
+  volt:    { name: 'חשמל',    en: 'Volt',    hue: 50,  color: '#f5d040' },
+  frost:   { name: 'כפור',    en: 'Frost',   hue: 186, color: '#84e0e6' },
+  stone:   { name: 'סלע',     en: 'Stone',   hue: 28,  color: '#b98a54' },
+  gale:    { name: 'רוח',     en: 'Gale',    hue: 195, color: '#a8cfe8' },
+  toxic:   { name: 'רעל',     en: 'Toxic',   hue: 285, color: '#b263cf' },
+  umbra:   { name: 'צל',      en: 'Umbra',   hue: 260, color: '#6b5a9e' },
+  lumen:   { name: 'אור',     en: 'Lumen',   hue: 320, color: '#f28ab8' },
+  metal:   { name: 'מתכת',    en: 'Metal',   hue: 210, color: '#9aa8b8' },
+  beast:   { name: 'חיה',     en: 'Beast',   hue: 8,   color: '#c9603f' },
+};
+
+const TYPE_IDS = Object.keys(TYPES);
+
+// attacker -> { defender: multiplier }.  Anything omitted is 1x.
+const X = {
+  ember:   { verdant: 2, frost: 2, metal: 2, aqua: .5, stone: .5, ember: .5 },
+  aqua:    { ember: 2, stone: 2, aqua: .5, verdant: .5, volt: .5 },
+  verdant: { aqua: 2, stone: 2, verdant: .5, ember: .5, toxic: .5, gale: .5, metal: .5 },
+  volt:    { aqua: 2, gale: 2, verdant: .5, volt: .5, stone: 0 },
+  frost:   { verdant: 2, gale: 2, beast: 2, ember: .5, aqua: .5, frost: .5, metal: .5 },
+  stone:   { ember: 2, volt: 2, toxic: 2, metal: 2, verdant: .5, aqua: .5 },
+  gale:    { verdant: 2, beast: 2, volt: .5, stone: .5, metal: .5 },
+  toxic:   { verdant: 2, lumen: 2, stone: .5, toxic: .5, metal: 0 },
+  umbra:   { lumen: 2, umbra: 2, beast: .5, metal: .5 },
+  lumen:   { toxic: 2, beast: 2, umbra: .5, metal: .5, lumen: .5 },
+  metal:   { frost: 2, stone: 2, lumen: 2, ember: .5, aqua: .5, volt: .5, metal: .5 },
+  beast:   { neutral: 2, frost: 2, stone: 2, metal: 2, umbra: 2, gale: .5, toxic: .5, lumen: 0 },
+  neutral: { stone: .5, metal: .5, umbra: .5 },
+};
+
+function typeMultiplier(attackType, defenderTypes) {
+  const row = X[attackType] || {};
+  let m = 1;
+  for (const d of defenderTypes) m *= row[d] ?? 1;
+  return m;
+}
+
+function effectivenessLabel(m) {
+  if (m === 0) return 'אין לזה שום השפעה…';
+  if (m >= 4) return 'פגיעה הרסנית!';
+  if (m > 1) return 'זה סופר-אפקטיבי!';
+  if (m < 1) return 'זה לא ממש אפקטיבי…';
+  return null;
+}
+
+const typeColor = (t) => TYPES[t]?.color ?? '#999';
+const typeName = (t) => TYPES[t]?.name ?? t;
+  return { TYPES, TYPE_IDS, typeMultiplier, effectivenessLabel, typeColor, typeName };
+})();
+
+/* ===== src3d/main3d.js ===== */
+const __m_src3d_main3d_js = (() => {
+  const { Renderer, OrbitCamera } = __m_src3d_core_renderer_js;
+  const { Stack } = __m_src3d_core_mat4_js;
+  const { Terrain3D, buildProps, UNIT } = __m_src3d_world_terrain3d_js;
+  const { buildCreatureMesh, AURA_COLOR, hsl2rgb } = __m_src3d_gfx_creature3d_js;
+  const { buildActorMeshes, buildShadowMesh } = __m_src3d_gfx_actor3d_js;
+  const { TileMap } = __m_src_world_tilemap_js;
+  const { getSpecies } = __m_src_data_species_js;
+  const { typeName, typeColor } = __m_src_data_types_js;
+  const { pickWeighted, rangeInt, clamp } = __m_src_core_util_js;
+// 3D prototype: walk a real map from the 2D game in a low-poly world, with
+// creatures roaming in the open that you can approach and engage.
+//
+// This is the foundation pass — terrain, camera, movement, creature meshes and
+// world encounters. Battles, towns and the rest of the systems get ported on
+// top of it.
+
+
+
+
+
+
+
+
+
+
+
+const MOVE_SPEED = 9;
+const RUN_SPEED = 16;
+const SWIM_SPEED = 5;
+
+class World3D {
+  constructor(canvas, overlay, mapId = 'route1') {
+    this.canvas = canvas;
+    this.overlay = overlay;
+    this.ctx2d = overlay.getContext('2d');
+    this.renderer = new Renderer(canvas);
+    this.camera = new OrbitCamera();
+    this.stack = new Stack();
+    this.t = 0;
+    this.keys = new Set();
+    this.mode = 'walk';           // walk | swim
+    this.nearby = null;
+    this.message = '';
+    this.messageT = 0;
+    this.bindInput();
+    this.load(mapId);
+  }
+
+  // ------------------------------------------------------------- loading --
+  load(mapId) {
+    const R = this.renderer;
+    this.map = new TileMap(mapId);
+    this.terrain = new Terrain3D(this.map);
+    this.terrainMesh = R.mesh(this.terrain.build());
+    const water = this.terrain.buildWater();
+    this.waterMesh = water ? R.mesh(water) : null;
+    this.propsMesh = R.mesh(buildProps(this.map, this.terrain));
+    this.shadowMesh = R.mesh(buildShadowMesh(1));
+
+    this.actor = {};
+    for (const [k, v] of Object.entries(buildActorMeshes('hero'))) this.actor[k] = R.mesh(v);
+
+    // one mesh per species that can appear here
+    this.creatureMeshes = new Map();
+    const table = this.map.def.encounters?.grass || this.map.def.encounters?.cave || [];
+    this.encounterTable = table;
+    for (const e of table) {
+      if (!this.creatureMeshes.has(e.species)) {
+        this.creatureMeshes.set(e.species, R.mesh(buildCreatureMesh(e.species)));
+      }
+    }
+
+    // spawn point: first walkable tile near the middle
+    const start = this.findSpawn();
+    this.player = {
+      x: start.x * UNIT + UNIT / 2, z: start.z * UNIT + UNIT / 2,
+      y: 0, facing: 0, step: 0, speed: 0,
+    };
+    this.player.y = this.terrain.heightAt(this.player.x, this.player.z);
+
+    this.creatures = [];
+    this.spawnCreatures(16);
+    this.spawnNearPlayer(3);
+    this.message = this.map.name;
+    this.messageT = 3;
+  }
+
+  findSpawn() {
+    const cx = Math.floor(this.map.w / 2), cz = Math.floor(this.map.h / 2);
+    for (let r = 0; r < Math.max(this.map.w, this.map.h); r++) {
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+        const x = cx + dx, z = cz + dz;
+        if (x < 1 || z < 1 || x >= this.map.w - 1 || z >= this.map.h - 1) continue;
+        const info = this.map.info(x, z);
+        if (!info.solid && !info.water) return { x, z };
+      }
+    }
+    return { x: 1, z: 1 };
+  }
+
+  spawnCreatures(n) {
+    if (!this.encounterTable.length) return;
+    let guard = 0;
+    while (this.creatures.length < n && guard++ < n * 60) {
+      const x = rangeInt(1, this.map.w - 2), z = rangeInt(1, this.map.h - 2);
+      const info = this.map.info(x, z);
+      if (info.solid || info.water || !info.enc) continue;
+      const entry = pickWeighted(this.encounterTable);
+      this.creatures.push({
+        species: entry.species,
+        level: rangeInt(entry.min, entry.max),
+        x: x * UNIT + UNIT / 2, z: z * UNIT + UNIT / 2,
+        home: { x: x * UNIT + UNIT / 2, z: z * UNIT + UNIT / 2 },
+        y: 0, facing: Math.random() * 6.28, phase: Math.random() * 6.28,
+        target: null, cool: Math.random() * 3,
+      });
+    }
+    for (const c of this.creatures) c.y = this.terrain.heightAt(c.x, c.z);
+  }
+
+  /** Line a set of species up in front of the camera — an art-review mode. */
+  showcase(ids) {
+    const R = this.renderer;
+    this.creatures = [];
+    const spacing = 5.5;
+    ids.forEach((id, i) => {
+      if (!this.creatureMeshes.has(id)) this.creatureMeshes.set(id, R.mesh(buildCreatureMesh(id)));
+      const x = this.player.x + (i - (ids.length - 1) / 2) * spacing;
+      const z = this.player.z - 9;
+      this.creatures.push({
+        species: id, level: 20, x, z, home: { x, z },
+        y: this.terrain.heightAt(x, z), facing: Math.PI,
+        phase: i, target: null, cool: 1e9,
+      });
+    });
+    this.camera.distance = 17;
+    this.camera.pitch = 0.30;
+    this.showcaseMode = true;
+  }
+
+  /** A few guaranteed neighbours, so the world never looks empty on arrival. */
+  spawnNearPlayer(n) {
+    if (!this.encounterTable.length) return;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * 6.28 + 0.6;
+      const r = 9 + i * 3;
+      const x = this.player.x + Math.cos(a) * r, z = this.player.z + Math.sin(a) * r;
+      if (this.blocked(x, z)) continue;
+      const entry = pickWeighted(this.encounterTable);
+      this.creatures.push({
+        species: entry.species, level: rangeInt(entry.min, entry.max),
+        x, z, home: { x, z }, y: this.terrain.heightAt(x, z),
+        facing: Math.random() * 6.28, phase: Math.random() * 6.28,
+        target: null, cool: Math.random() * 3,
+      });
+    }
+  }
+
+  // --------------------------------------------------------------- input --
+  bindInput() {
+    addEventListener('keydown', (e) => {
+      this.keys.add(e.code);
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+      if (e.code === 'KeyZ' || e.code === 'Enter') this.interact();
+    });
+    addEventListener('keyup', (e) => this.keys.delete(e.code));
+    let dragging = false, lastX = 0;
+    this.canvas.addEventListener('pointerdown', (e) => { dragging = true; lastX = e.clientX; });
+    addEventListener('pointerup', () => { dragging = false; });
+    addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      this.camera.yaw -= (e.clientX - lastX) * 0.008;
+      lastX = e.clientX;
+    });
+    this.canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      this.camera.distance = clamp(this.camera.distance + Math.sign(e.deltaY) * 2, 10, 60);
+    }, { passive: false });
+  }
+
+  interact() {
+    if (!this.nearby) return;
+    const c = this.nearby;
+    const sp = getSpecies(c.species);
+    this.message = `${sp.name} (רמה ${c.level}) מוכן לקרב!`;
+    this.messageT = 2.5;
+    this.onEncounter?.(c);
+  }
+
+  // -------------------------------------------------------------- update --
+  blocked(wx, wz) {
+    const tx = Math.floor(wx / UNIT), tz = Math.floor(wz / UNIT);
+    if (tx < 0 || tz < 0 || tx >= this.map.w || tz >= this.map.h) return true;
+    const info = this.map.info(tx, tz);
+    if (info.void) return true;
+    // Water is not a wall — you swim across it.
+    return !!info.solid && !info.water;
+  }
+
+  update(dt) {
+    this.t += dt;
+    if (this.messageT > 0) this.messageT -= dt;
+    const K = this.keys;
+    const { fx, fz, rx, rz } = this.camera.basis();
+    let mx = 0, mz = 0;
+    if (K.has('KeyW') || K.has('ArrowUp')) { mx += fx; mz += fz; }
+    if (K.has('KeyS') || K.has('ArrowDown')) { mx -= fx; mz -= fz; }
+    if (K.has('KeyA') || K.has('ArrowLeft')) { mx -= rx; mz -= rz; }
+    if (K.has('KeyD') || K.has('ArrowRight')) { mx += rx; mz += rz; }
+    if (K.has('KeyQ')) this.camera.yaw += dt * 1.8;
+    if (K.has('KeyE')) this.camera.yaw -= dt * 1.8;
+
+    const p = this.player;
+    const len = Math.hypot(mx, mz);
+    const running = K.has('ShiftLeft') || K.has('ShiftRight');
+    const speed = this.mode === 'swim' ? SWIM_SPEED : running ? RUN_SPEED : MOVE_SPEED;
+    if (len > 0.01) {
+      mx /= len; mz /= len;
+      const nx = p.x + mx * speed * dt, nz = p.z + mz * speed * dt;
+      if (!this.blocked(nx, p.z)) p.x = nx;
+      if (!this.blocked(p.x, nz)) p.z = nz;
+      p.facing = Math.atan2(mx, mz);
+      p.step += dt * (running ? 11 : 7);
+      p.speed = speed;
+    } else {
+      p.speed = 0;
+      p.step += dt * 1.5;
+    }
+    const tile = this.map.info(Math.floor(p.x / UNIT), Math.floor(p.z / UNIT));
+    this.mode = tile.water ? 'swim' : 'walk';
+    const ground = this.terrain.heightAt(p.x, p.z);
+    p.y += (ground - p.y) * (1 - Math.pow(0.0005, dt));
+
+    // roaming creatures
+    let best = null, bestD = 7 * 7;
+    for (const c of this.creatures) {
+      if (this.showcaseMode) { c.facing = Math.PI; c.y = this.terrain.heightAt(c.x, c.z); continue; }
+      c.cool -= dt;
+      if (c.cool <= 0) {
+        c.cool = 1.5 + Math.random() * 3;
+        const a = Math.random() * 6.28, r = 3 + Math.random() * 7;
+        c.target = { x: c.home.x + Math.cos(a) * r, z: c.home.z + Math.sin(a) * r };
+      }
+      if (c.target) {
+        const dx = c.target.x - c.x, dz = c.target.z - c.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 0.4) c.target = null;
+        else {
+          const step = Math.min(d, 2.6 * dt);
+          const nx = c.x + (dx / d) * step, nz = c.z + (dz / d) * step;
+          if (!this.blocked(nx, nz)) { c.x = nx; c.z = nz; c.facing = Math.atan2(dx, dz); }
+          else c.target = null;
+        }
+      }
+      c.y += (this.terrain.heightAt(c.x, c.z) - c.y) * (1 - Math.pow(0.001, dt));
+      const dd = (c.x - p.x) ** 2 + (c.z - p.z) ** 2;
+      if (dd < bestD) { bestD = dd; best = c; }
+    }
+    if (this.showcaseMode) {
+      for (const c of this.creatures) {
+        const dd = (c.x - p.x) ** 2 + (c.z - p.z) ** 2;
+        if (dd < bestD) { bestD = dd; best = c; }
+      }
+    }
+    this.nearby = best;
+
+    this.camera.update(p.x, p.y, p.z, dt);
+  }
+
+  // ---------------------------------------------------------------- draw --
+  render() {
+    const R = this.renderer;
+    R.beginFrame(this.camera);
+    R.draw(this.terrainMesh, {});
+    R.draw(this.propsMesh, {});
+
+    // contact shadows first, flat on the ground
+    const shade = (x, y, z, r) =>
+      R.draw(this.shadowMesh, { x, y: y + 0.06, z, scale: r, alpha: 0.28, emissive: 1, tint: [0, 0, 0] });
+
+    const p = this.player;
+    shade(p.x, p.y, p.z, 0.9);
+    for (const c of this.creatures) {
+      shade(c.x, c.y, c.z, 0.8 * (getSpecies(c.species).design.size ?? 1));
+    }
+
+    this.drawPlayer();
+
+    for (const c of this.creatures) {
+      const mesh = this.creatureMeshes.get(c.species);
+      if (!mesh) continue;
+      const bob = Math.sin(this.t * 2.2 + c.phase) * 0.09;
+      const highlight = c === this.nearby;
+      R.draw(mesh, {
+        x: c.x, y: c.y + bob, z: c.z, rotY: c.facing,
+        tint: highlight ? [1.25, 1.25, 1.15] : [1, 1, 1],
+      });
+    }
+
+    if (this.waterMesh) {
+      R.depthWrite(false);
+      R.draw(this.waterMesh, { alpha: 0.80, emissive: 0.18 });
+      R.depthWrite(true);
+    }
+    this.drawOverlay();
+  }
+
+  drawPlayer() {
+    const R = this.renderer, s = this.stack, p = this.player;
+    const swim = this.mode === 'swim';
+    const bodyY = p.y + (swim ? -0.55 : 0) + Math.abs(Math.sin(p.step)) * (p.speed ? 0.07 : 0);
+    const swing = p.speed ? Math.sin(p.step) * 0.8 : Math.sin(this.t * 1.5) * 0.06;
+
+    s.reset();
+    s.translate(p.x, bodyY, p.z);
+    s.rotateY(p.facing);
+    R.drawMatrix(this.actor.body, s.m);
+
+    for (const side of [-1, 1]) {
+      s.push();
+      s.translate(side * 0.55, 1.78, 0);
+      s.rotateX(swing * side);
+      R.drawMatrix(this.actor.arm, s.m);
+      s.pop();
+      s.push();
+      s.translate(side * 0.22, 0.92, 0);
+      s.rotateX(-swing * side);
+      R.drawMatrix(this.actor.leg, s.m);
+      s.pop();
+    }
+  }
+
+  drawOverlay() {
+    const ctx = this.ctx2d;
+    const W = this.overlay.width, H = this.overlay.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.direction = 'rtl';
+    ctx.textAlign = 'right';
+
+    const panel = (x, y, w, h) => {
+      ctx.fillStyle = 'rgba(10,16,28,.78)';
+      ctx.strokeStyle = 'rgba(150,200,255,.35)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(x, y, w, h, 12); ctx.fill(); ctx.stroke();
+    };
+
+    // location + mode
+    panel(W - 300, 18, 282, 62);
+    ctx.fillStyle = '#eaf3ff';
+    ctx.font = '700 22px "Trebuchet MS", system-ui, sans-serif';
+    ctx.fillText(this.map.name, W - 36, 46);
+    ctx.font = '600 15px "Trebuchet MS", system-ui, sans-serif';
+    ctx.fillStyle = '#9fc0e4';
+    ctx.fillText(this.mode === 'swim' ? 'שחייה' : 'הליכה', W - 36, 68);
+
+    // nearby creature
+    if (this.nearby) {
+      const sp = getSpecies(this.nearby.species);
+      panel(W - 330, 96, 312, 92);
+      ctx.fillStyle = '#fff';
+      ctx.font = '700 21px "Trebuchet MS", system-ui, sans-serif';
+      ctx.fillText(`${sp.name}  ·  רמה ${this.nearby.level}`, W - 36, 126);
+      let cx = W - 36;
+      ctx.font = '700 13px "Trebuchet MS", system-ui, sans-serif';
+      for (const t of sp.types) {
+        const label = typeName(t);
+        const w = ctx.measureText(label).width + 18;
+        ctx.fillStyle = typeColor(t);
+        ctx.beginPath(); ctx.roundRect(cx - w, 138, w, 24, 12); ctx.fill();
+        ctx.fillStyle = '#12161f';
+        ctx.fillText(label, cx - 9, 155);
+        cx -= w + 6;
+      }
+      ctx.fillStyle = '#8fe8ff';
+      ctx.font = '600 15px "Trebuchet MS", system-ui, sans-serif';
+      ctx.fillText('Z — התקרב והילחם', W - 36, 180);
+    }
+
+    if (this.messageT > 0) {
+      ctx.globalAlpha = Math.min(1, this.messageT);
+      const w = ctx.measureText(this.message).width + 60;
+      panel((W - w) / 2, H - 118, w, 52);
+      ctx.fillStyle = '#eaf3ff';
+      ctx.font = '700 20px "Trebuchet MS", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(this.message, W / 2, H - 84);
+      ctx.textAlign = 'right';
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.fillStyle = 'rgba(190,215,245,.75)';
+    ctx.font = '600 14px "Trebuchet MS", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('WASD/חיצים — תנועה · גרירה או Q/E — סיבוב מצלמה · גלגלת — זום · Shift — ריצה · Z — אינטראקציה',
+      W / 2, H - 24);
+  }
+
+  resize(w, h) {
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    this.renderer.resize(w, h, dpr);
+    this.canvas.style.width = this.overlay.style.width = w + 'px';
+    this.canvas.style.height = this.overlay.style.height = h + 'px';
+    this.overlay.width = w; this.overlay.height = h;
+  }
+}
+  return { World3D };
+})();
+
+/* ===== page bootstrap ===== */
+const { World3D } = __m_src3d_main3d_js;
+
+
+
+const err = document.getElementById('err');
+try {
+  const world = new World3D(document.getElementById('gl'), document.getElementById('overlay'),
+    new URLSearchParams(location.search).get('map') || 'route1');
+  const fit = () => world.resize(innerWidth, innerHeight);
+  addEventListener('resize', fit);
+  fit();
+  window.__world = world;
+  const show = new URLSearchParams(location.search).get('showcase');
+  if (show) world.showcase(show.split(','));
+
+  let last = performance.now();
+  const loop = () => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    world.update(dt);
+    world.render();
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+} catch (e) {
+  console.error(e);
+  err.style.display = 'grid';
+  err.textContent = 'שגיאה: ' + e.message;
+}
+
+</script>
+</body>
+</html>
