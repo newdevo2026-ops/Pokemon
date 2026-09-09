@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Aurelia — Monster Quest</title>
+<style>
+  body { margin:0; min-height:100vh; display:grid; place-items:center; gap:0;
+         background: radial-gradient(1000px 700px at 50% -10%, #1d2b45, #070a12);
+         color:#dce6f5; font-family:"Trebuchet MS", system-ui, sans-serif; }
+  main { text-align:center; padding:40px 20px; }
+  h1 { font-size:clamp(38px,7vw,72px); letter-spacing:.28em; margin:0;
+       background:linear-gradient(180deg,#fff,#6ec9ff 60%,#2b6ea8);
+       -webkit-background-clip:text; background-clip:text; color:transparent; }
+  p.sub { letter-spacing:.4em; color:#7f9dc4; margin:6px 0 42px; font-size:14px; }
+  .cards { display:flex; gap:22px; flex-wrap:wrap; justify-content:center; }
+  a.card { display:block; width:280px; padding:26px 22px; border-radius:18px;
+           text-decoration:none; color:inherit; background:rgba(24,33,54,.9);
+           border:1px solid rgba(140,190,240,.28); transition:.18s;
+           box-shadow:0 18px 40px rgba(0,0,0,.5); }
+  a.card:hover { transform:translateY(-4px); border-color:rgba(140,200,255,.7); }
+  a.card b { display:block; font-size:24px; margin-bottom:10px; }
+  a.card span { color:#9db4d4; font-size:15px; line-height:1.6; }
+  footer { color:#5b76a0; font-size:13px; margin-top:38px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AURELIA</h1>
+  <p class="sub">M O N S T E R &nbsp; Q U E S T</p>
+  <div class="cards">
+    <a class="card" href="game3d.html">
+      <b>תלת־ממד</b>
+      <span>עולם פתוח, יצורים מסתובבים בשטח, בתים שנכנסים אליהם. הגרסה שבפיתוח.</span>
+    </a>
+    <a class="card" href="index.html">
+      <b>דו־ממד</b>
+      <span>הגרסה המלאה והמלוטשת — כל המפות, המאמנים והקרבות.</span>
+    </a>
+  </div>
+  <footer>חיצים לתנועה · Z אישור · X ביטול · Tab תפריט · Shift ריצה</footer>
+</main>
+</body>
+</html>

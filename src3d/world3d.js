@@ -5,7 +5,7 @@
 import { Renderer, OrbitCamera } from './core/renderer.js';
 import { Stack } from './core/mat4.js';
 import { Terrain3D, buildProps, UNIT } from './world/terrain3d.js';
-import { buildCreatureMesh } from './gfx/creature3d.js';
+import { ModelRegistry } from './gfx/models.js';
 import { buildActorMeshes, buildShadowMesh } from './gfx/actor3d.js';
 import { TileMap } from '../src/world/tilemap.js';
 import { getSpecies } from '../src/data/species.js';
@@ -34,7 +34,8 @@ export class World3D {
     this.mode = 'walk';
     this.focus = null;           // whatever pressing Z would act on
     this.actorCache = new Map();
-    this.creatureCache = new Map();
+    this.models = new ModelRegistry(this.renderer);
+    this.models.init();
     this.shadowMesh = this.renderer.mesh(buildShadowMesh(1));
     this.pendingTrainer = null;
     this.bindPointer(canvas);
@@ -106,12 +107,8 @@ export class World3D {
     return this.actorCache.get(look);
   }
 
-  creatureMesh(species) {
-    if (!this.creatureCache.has(species)) {
-      this.creatureCache.set(species, this.renderer.mesh(buildCreatureMesh(species)));
-    }
-    return this.creatureCache.get(species);
-  }
+  /** Warms whatever art this creature will use — imported or generated. */
+  prepareCreature(species) { this.models.request(species); }
 
   storePlayerPosition() {
     const p = this.state.data.player;
@@ -131,7 +128,7 @@ export class World3D {
       const x = tx * UNIT + UNIT / 2, z = tz * UNIT + UNIT / 2;
       if (this.player && (x - this.player.x) ** 2 + (z - this.player.z) ** 2 < 400) continue;
       const entry = pickWeighted(this.encounterTable);
-      this.creatureMesh(entry.species);
+      this.prepareCreature(entry.species);
       this.roamers.push({
         species: entry.species, level: rangeInt(entry.min, entry.max),
         x, z, y: this.terrain.heightAt(x, z), home: { x, z },
@@ -414,7 +411,7 @@ export class World3D {
     for (const r of this.roamers) {
       const bob = Math.sin(this.t * 2.3 + r.phase) * 0.09;
       const lit = this.focus?.obj === r;
-      R.draw(this.creatureMesh(r.species), {
+      this.models.draw(r.species, {
         x: r.x, y: r.y + bob, z: r.z, rotY: r.facing,
         tint: lit ? [1.3, 1.3, 1.18] : [1, 1, 1],
       });

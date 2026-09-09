@@ -1,0 +1,4 @@
+{
+  "_comment": "Add a creature id here after dropping assets/models/<id>.glb in. Anything not listed keeps its generated mesh.",
+  "models": []
+}

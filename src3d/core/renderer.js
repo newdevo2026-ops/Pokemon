@@ -10,28 +10,41 @@ precision highp float;
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNormal;
 layout(location=2) in vec3 aColor;
+layout(location=3) in vec2 aUV;
 uniform mat4 uViewProj;
 uniform mat4 uModel;
-flat out vec3 vNormal;
+// Two copies of the normal: procedural geometry wants the faceted look,
+// imported models ship smooth normals and should keep them.
+flat out vec3 vNormalFlat;
+out vec3 vNormalSmooth;
 out vec3 vColor;
+out vec2 vUV;
 out float vDepth;
 out vec3 vWorld;
 void main() {
   vec4 world = uModel * vec4(aPos, 1.0);
   gl_Position = uViewProj * world;
   // Uniform scale only, so the model matrix doubles as the normal matrix.
-  vNormal = normalize(mat3(uModel) * aNormal);
+  vec3 n = normalize(mat3(uModel) * aNormal);
+  vNormalFlat = n;
+  vNormalSmooth = n;
   vColor = aColor;
+  vUV = aUV;
   vWorld = world.xyz;
   vDepth = gl_Position.w;
 }`;
 
 const FRAG = `#version 300 es
 precision highp float;
-flat in vec3 vNormal;
+flat in vec3 vNormalFlat;
+in vec3 vNormalSmooth;
 in vec3 vColor;
+in vec2 vUV;
 in float vDepth;
 in vec3 vWorld;
+uniform sampler2D uTex;
+uniform float uUseTex;
+uniform float uSmooth;
 uniform vec3 uLightDir;
 uniform vec3 uSkyColor;
 uniform vec3 uGroundColor;
@@ -42,14 +55,16 @@ uniform float uAlpha;
 uniform float uEmissive;
 out vec4 fragColor;
 void main() {
-  vec3 n = normalize(vNormal);
+  vec3 n = normalize(mix(vNormalFlat, vNormalSmooth, uSmooth));
+  vec4 tex = texture(uTex, vUV);
+  vec3 albedo = mix(vColor, vColor * tex.rgb, uUseTex);
   float lambert = max(dot(n, uLightDir), 0.0);
   // Hemisphere ambient: sky above, bounced ground light below.
   float hemi = n.y * 0.5 + 0.5;
   vec3 ambient = mix(uGroundColor, uSkyColor, hemi);
   vec3 warm = vec3(1.06, 1.0, 0.90);
-  vec3 lit = vColor * uTint * (ambient + lambert * 0.95 * warm);
-  lit = mix(lit, vColor * uTint, uEmissive);
+  vec3 lit = albedo * uTint * (ambient + lambert * 0.95 * warm);
+  lit = mix(lit, albedo * uTint, uEmissive);
   float fog = clamp((vDepth - uFogRange.x) / (uFogRange.y - uFogRange.x), 0.0, 1.0);
   fragColor = vec4(mix(lit, uFogColor, fog * 0.75), uAlpha);
 }`;
@@ -65,20 +80,38 @@ function compile(gl, type, src) {
 }
 
 export class Mesh {
+  /** @param data {pos, norm, col, count, uv?, indices?} */
   constructor(gl, data) {
     this.gl = gl;
-    this.count = data.count;
     this.vao = gl.createVertexArray();
     gl.bindVertexArray(this.vao);
-    const attach = (loc, arr) => {
+    this.bufs = [];
+    const attach = (loc, arr, size) => {
       const buf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
-      return buf;
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+      this.bufs.push(buf);
     };
-    this.bufs = [attach(0, data.pos), attach(1, data.norm), attach(2, data.col)];
+    attach(0, data.pos, 3);
+    attach(1, data.norm, 3);
+    attach(2, data.col, 3);
+    if (data.uv) attach(3, data.uv, 2);
+    if (data.indices) {
+      const big = data.pos.length / 3 > 65535;
+      this.indexType = big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+      const arr = big ? new Uint32Array(data.indices) : new Uint16Array(data.indices);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+      this.bufs.push(buf);
+      this.count = arr.length;
+      this.indexed = true;
+    } else {
+      this.count = data.count ?? data.pos.length / 3;
+      this.indexed = false;
+    }
     gl.bindVertexArray(null);
   }
   dispose() {
@@ -107,7 +140,8 @@ export class Renderer {
     this.prog = prog;
     this.u = {};
     for (const n of ['uViewProj','uModel','uLightDir','uSkyColor','uGroundColor',
-                     'uFogColor','uFogRange','uTint','uAlpha','uEmissive']) {
+                     'uFogColor','uFogRange','uTint','uAlpha','uEmissive',
+                     'uTex','uUseTex','uSmooth']) {
       this.u[n] = gl.getUniformLocation(prog, n);
     }
 
@@ -137,6 +171,25 @@ export class Renderer {
   }
 
   mesh(data) { return new Mesh(this.gl, data); }
+
+  /** Uploads an ImageBitmap as a mipmapped, repeating texture. */
+  texture(bitmap) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    const max = gl.getExtension('EXT_texture_filter_anisotropic');
+    if (max) {
+      gl.texParameterf(gl.TEXTURE_2D, max.TEXTURE_MAX_ANISOTROPY_EXT,
+        Math.min(8, gl.getParameter(max.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+    }
+    return tex;
+  }
 
   /** `dpr` is the display ratio; we render above it and let the browser
    *  downscale, which is what actually removes the stair-stepping. */
@@ -172,22 +225,38 @@ export class Renderer {
     const s = o.scale ?? 1;
     mat4.fromTRS(this.model, o.x ?? 0, o.y ?? 0, o.z ?? 0, o.rotY ?? 0, s, o.scaleY ?? s, s);
     gl.uniformMatrix4fv(this.u.uModel, false, this.model);
-    gl.uniform3fv(this.u.uTint, o.tint ?? [1, 1, 1]);
-    gl.uniform1f(this.u.uAlpha, o.alpha ?? 1);
-    gl.uniform1f(this.u.uEmissive, o.emissive ?? 0);
-    gl.bindVertexArray(mesh.vao);
-    gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
+    this._material(o);
+    this._issue(mesh);
   }
 
   /** Draw with a fully composed model matrix — used for animated limbs. */
   drawMatrix(mesh, model, o = {}) {
+    this.gl.uniformMatrix4fv(this.u.uModel, false, model);
+    this._material(o);
+    this._issue(mesh);
+  }
+
+  _material(o) {
     const gl = this.gl;
-    gl.uniformMatrix4fv(this.u.uModel, false, model);
     gl.uniform3fv(this.u.uTint, o.tint ?? [1, 1, 1]);
     gl.uniform1f(this.u.uAlpha, o.alpha ?? 1);
     gl.uniform1f(this.u.uEmissive, o.emissive ?? 0);
+    gl.uniform1f(this.u.uSmooth, o.smooth ? 1 : 0);
+    if (o.texture) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, o.texture);
+      gl.uniform1i(this.u.uTex, 0);
+      gl.uniform1f(this.u.uUseTex, 1);
+    } else {
+      gl.uniform1f(this.u.uUseTex, 0);
+    }
+  }
+
+  _issue(mesh) {
+    const gl = this.gl;
     gl.bindVertexArray(mesh.vao);
-    gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
+    if (mesh.indexed) gl.drawElements(gl.TRIANGLES, mesh.count, mesh.indexType, 0);
+    else gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
   }
 
   depthWrite(on) { this.gl.depthMask(on); }
