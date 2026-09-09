@@ -1,0 +1,682 @@
+// The world.  Maps are ASCII grids (see world/tiles.js for the legend) plus
+// warps, NPCs, encounter tables and ground items.
+
+const HOUSE_ROWS = [
+  'HHHHHHHHHHHH',
+  'HBffffffffPH',
+  'HffffffffffH',
+  'HffxfffffffH',
+  'HffffffffffH',
+  'HffffffffffH',
+  'HffffffffffH',
+  'HHHHHdHHHHHH',
+  'HHHHHHHHHHHH',
+];
+
+export const MAPS = {
+  // ======================================================= VERDANT HOLLOW ==
+  verdant_hollow: {
+    name: 'עמק הירוק',
+    music: 'town',
+    outdoor: true,
+    rows: [
+      '##############=###############',
+      '#.............==.............#',
+      '#..*..........==..........*..#',
+      '#....HHHHHH...==...HHHHHH....#',
+      '#....HHHHHH...==...HHHHHH....#',
+      '#....HHDHHH...==...HHHDHH....#',
+      '#......==.....==.....==......#',
+      '#......================......#',
+      '#......==.....==.....==......#',
+      '#..*...==.....==.....==...*..#',
+      '#......==.....==.....==......#',
+      '#...HHHHHH....==....HHHHHH...#',
+      '#...HHHHHH....==....HHHHHH...#',
+      '#...HHHDHH....==....HHHHHH...#',
+      '#......==.....==.....==......#',
+      '#......================......#',
+      '#......==.....==.....==......#',
+      '#.,,,,,==.....==.....==,,,,,.#',
+      '#.,,,,,==.....S=.....==,,,,,.#',
+      '#.,,,,,==......=.....==......#',
+      '#......==......=.....==...%%.#',
+      '##############################',
+    ],
+    buildings: [
+      { x: 5, y: 3, w: 6, h: 3, roof: 208, wall: 38, door: 7, label: 'הבית שלי' },
+      { x: 19, y: 3, w: 6, h: 3, roof: 168, wall: 40, door: 22, label: 'מעבדת פרופ׳ אלון' },
+      { x: 4, y: 11, w: 6, h: 3, roof: 26, wall: 36, door: 7 },
+      { x: 20, y: 11, w: 6, h: 3, roof: 300, wall: 34 },
+    ],
+    warps: [
+      { x: 14, y: 0, to: 'route1', tx: 12, ty: 28, dir: 'up' },
+      { x: 7, y: 5, to: 'home', tx: 5, ty: 6, dir: 'up' },
+      { x: 22, y: 5, to: 'lab', tx: 6, ty: 8, dir: 'up' },
+      { x: 7, y: 13, to: 'house_a', tx: 5, ty: 6, dir: 'up' },
+    ],
+    signs: [
+      { x: 14, y: 18, text: 'עמק הירוק — "מקום שבו כל מסע מתחיל בצעד קטן".' },
+    ],
+    encounters: {
+      grass: [
+        { species: 'nibbly', min: 2, max: 4, weight: 6 },
+        { species: 'wingle', min: 2, max: 4, weight: 4 },
+      ],
+    },
+    npcs: [
+      {
+        id: 'gate_guard', x: 14, y: 1, dir: 'down', look: 'guard', name: 'שומר השער',
+        blockUntil: 'gotStarter',
+        lines: ['הדרך צפונה מלאה ביצורי בר.', 'אל תצא מכאן בלי בן־לוויה! לך לפרופ׳ אלון במעבדה.'],
+        linesAfter: ['בהצלחה במסע! שמור על הצוות שלך.'],
+      },
+      {
+        id: 'mom', x: 11, y: 9, dir: 'down', look: 'heroine', name: 'שכנה',
+        move: 'lookaround',
+        lines: ['הפרופסור אלון חיפש אותך.', 'הוא במעבדה, הבניין עם הגג הירוק.'],
+      },
+      {
+        id: 'kid1', x: 20, y: 17, dir: 'left', look: 'kid', name: 'ילד',
+        move: 'wander',
+        lines: ['בדשא הגבוה מסתתרים יצורים!', 'אם אין לך צוות, עדיף לעקוף אותו.'],
+      },
+      {
+        id: 'elder1', x: 5, y: 8, dir: 'right', look: 'elder', name: 'זקן הכפר',
+        lines: ['פעם, כשהייתי צעיר, טיפסתי עד לפסגה.',
+                'אומרים שמשהו זוהר חי שם למעלה… אבל מי מאמין לזקנים.'],
+      },
+    ],
+    items: [
+      { x: 27, y: 20, item: 'potion', flag: 'item_vh_1' },
+    ],
+  },
+
+  // ================================================================ HOME ==
+  home: {
+    name: 'הבית שלי', music: 'town', indoor: true,
+    rows: HOUSE_ROWS,
+    warps: [{ x: 5, y: 7, to: 'verdant_hollow', tx: 7, ty: 6, dir: 'down' }],
+    npcs: [
+      {
+        id: 'mother', x: 8, y: 3, dir: 'down', look: 'heroine', name: 'אמא',
+        lines: ['בוקר טוב! היום המסע שלך מתחיל.',
+                'הפרופסור אלון חיכה לך כל הבוקר. אל תאחר!'],
+        give: { item: 'boots', count: 1 }, giveFlag: 'gotBoots',
+        linesGive: ['רגע — שכחת את מגפי הריצה שלך.',
+                    'החזק Shift כדי לרוץ. עכשיו לך, ובהצלחה!'],
+        linesAfter: ['היצור שלך נראה מאושר לצידך. תשמור עליו.'],
+        afterFlag: 'gotStarter',
+        healParty: true,
+      },
+    ],
+  },
+
+  house_a: {
+    name: 'בית בעמק', music: 'town', indoor: true,
+    rows: HOUSE_ROWS,
+    warps: [{ x: 5, y: 7, to: 'verdant_hollow', tx: 7, ty: 14, dir: 'down' }],
+    npcs: [
+      {
+        id: 'collector', x: 3, y: 4, dir: 'right', look: 'scholar', name: 'אספן',
+        lines: ['כל יצור שייך לאחד משלושה־עשר טיפוסים.',
+                'להבה חזקה מול צומח, מים חזקים מול להבה, וצומח מול מים.',
+                'אם תזכור רק את זה — כבר תנצח בהרבה קרבות.'],
+      },
+      {
+        id: 'gift_guy', x: 8, y: 5, dir: 'left', look: 'villager2', name: 'שכן',
+        lines: ['קח, יש לי עודף. אולי יעזור לך בדרך.'],
+        give: { item: 'potion', count: 3 }, giveFlag: 'gift_potions',
+        linesAfter: ['תשתמש בהם בחוכמה!'],
+      },
+    ],
+  },
+
+  // ================================================================= LAB ==
+  lab: {
+    name: 'מעבדת פרופ׳ אלון', music: 'town', indoor: true,
+    rows: [
+      'HHHHHHHHHHHHHH',
+      'HBBBffffBBBBBH',
+      'HffffffffffffH',
+      'HffPffffffPffH',
+      'HffffffffffffH',
+      'HffxffffffxffH',
+      'HffffffffffffH',
+      'HffffffffffffH',
+      'HffffffffffffH',
+      'HHHHHHdHHHHHHH',
+      'HHHHHHHHHHHHHH',
+    ],
+    warps: [{ x: 6, y: 9, to: 'verdant_hollow', tx: 22, ty: 6, dir: 'down' }],
+    npcs: [
+      {
+        id: 'prof', x: 6, y: 2, dir: 'down', look: 'prof', name: 'פרופ׳ אלון',
+        starter: true,
+        lines: ['אה, סוף סוף הגעת!', 'שלושה יצורים צעירים מחכים כאן לבן־לוויה.',
+                'בחר את זה שמדבר אל הלב שלך.'],
+        linesAfter: ['הבחירה שלך הייתה מצוינת. צא לדרך, והשלם את הקטלוג!'],
+        afterFlag: 'gotStarter',
+      },
+      {
+        id: 'aide', x: 10, y: 6, dir: 'left', look: 'clerk', name: 'עוזר מעבדה',
+        lines: ['שיקויים מרפאים נקודות חיים.',
+                'ספֵרות לוכדות יצורי בר — אבל רק אם החלשת אותם קודם.'],
+        give: { item: 'ball', count: 5 }, giveFlag: 'gotBalls', giveNeeds: 'gotStarter',
+        linesGive: ['קח חמש ספֵרות מהמלאי שלנו. לך תתפוס משהו!'],
+      },
+      {
+        id: 'rival', x: 4, y: 6, dir: 'right', look: 'rival', name: 'יונתן',
+        rival: true, needs: 'gotStarter', flag: 'rival1',
+        lines: ['אז גם אתה קיבלת אחד? מעולה.', 'בוא נראה מי מאמן טוב יותר!'],
+        trainer: { intro: 'יונתן: אני לא אתן לך יתרון!', defeat: 'יונתן: לא רע… בפעם הבאה אנצח.',
+                   reward: 300, dynamicTeam: 'rivalStarter' },
+        linesAfter: ['יונתן: אני הולך להתאמן. ניפגש בסטונברוק!'],
+      },
+    ],
+  },
+
+  // ============================================================== ROUTE 1 ==
+  route1: {
+    name: 'נתיב 1', music: 'route', outdoor: true,
+    rows: [
+      '############=#############',
+      '#..........,==,..........#',
+      '#..###.....,==,.....###..#',
+      '#..###......==......###..#',
+      '#...........==...........#',
+      '#..,,,,.....==.....,,,,..#',
+      '#..,,,,.....==.....,,,,..#',
+      '#..,,,,.....==.....,,,,..#',
+      '#...........==...........#',
+      '#.###.......==.......###.#',
+      '#.###.......==.......###.#',
+      '#...........==...........#',
+      '#....~~~~...==...........#',
+      '#....~~~~...==....S......#',
+      '#....~~~~...==...........#',
+      '#...........==...........#',
+      '#-----------==-----------#',
+      '#...........==...........#',
+      '#..,,,,,....==....,,,,,..#',
+      '#..,,,,,....==....,,,,,..#',
+      '#..,,,,,....==....,,,,,..#',
+      '#...........==...........#',
+      '#..##.......==.......##..#',
+      '#..##.......==.......##..#',
+      '#...........==...........#',
+      '#....,,,....==....,,,....#',
+      '#....,,,....==....,,,....#',
+      '#...........==...........#',
+      '#...........==...........#',
+      '############=#############',
+    ],
+    warps: [
+      { x: 12, y: 29, to: 'verdant_hollow', tx: 14, ty: 1, dir: 'down' },
+      { x: 12, y: 0, to: 'stonebrook', tx: 7, ty: 20, dir: 'up' },
+    ],
+    signs: [
+      { x: 18, y: 13, text: 'נתיב 1 — צפונה: סטונברוק. דרומה: עמק הירוק.\nזהירות: מדרון חד־כיווני לפניך.' },
+    ],
+    encounters: {
+      grass: [
+        { species: 'nibbly', min: 3, max: 6, weight: 6 },
+        { species: 'wingle', min: 3, max: 6, weight: 5 },
+        { species: 'buzzlet', min: 3, max: 6, weight: 4 },
+        { species: 'voltpup', min: 4, max: 7, weight: 2 },
+        { species: 'rockle', min: 4, max: 7, weight: 2 },
+        { species: 'frostkit', min: 4, max: 7, weight: 1 },
+      ],
+    },
+    npcs: [
+      {
+        id: 't_r1_a', x: 6, y: 21, dir: 'right', look: 'kid', name: 'טירון מיה',
+        sight: 4, flag: 'trainer_r1_a',
+        trainer: {
+          intro: 'מיה: הצוות שלי קטן אבל נחוש!',
+          defeat: 'מיה: אוףף! הייתי צריכה להתאמן יותר.',
+          reward: 180,
+          team: [{ species: 'nibbly', level: 5 }, { species: 'wingle', level: 6 }],
+        },
+        linesAfter: ['מיה: הדשא הגבוה מסתיר הפתעות. שמור על שיקויים!'],
+      },
+      {
+        id: 't_r1_b', x: 18, y: 8, dir: 'left', look: 'hiker', name: 'מטייל בועז',
+        sight: 4, flag: 'trainer_r1_b',
+        trainer: {
+          intro: 'בועז: הסלעים כאן קשים — וגם היצורים שלי.',
+          defeat: 'בועז: קשה כמו סלע, אבל אתה קשה יותר.',
+          reward: 260,
+          team: [{ species: 'rockle', level: 7 }, { species: 'nibbly', level: 6 }],
+        },
+        linesAfter: ['בועז: מהלכים מסוג מים וצומח מרסקים סלעים.'],
+      },
+      {
+        id: 'r1_hint', x: 20, y: 17, dir: 'down', look: 'villager', name: 'עוברת אורח',
+        lines: ['מדרון כזה אפשר לקפוץ רק כלפי מטה.', 'קיצור דרך נחמד בדרך חזרה הביתה.'],
+      },
+    ],
+    items: [
+      { x: 4, y: 24, item: 'ball', flag: 'item_r1_1' },
+      { x: 21, y: 4, item: 'potion', flag: 'item_r1_2' },
+    ],
+  },
+
+  // =========================================================== STONEBROOK ==
+  stonebrook: {
+    name: 'סטונברוק', music: 'town', outdoor: true,
+    rows: [
+      '##############=###############',
+      '#.............==.............#',
+      '#...HHHHHHH...==...HHHHHHH...#',
+      '#...HHHHHHH...==...HHHHHHH...#',
+      '#...HHHDHHH...==...HHHDHHH...#',
+      '#......==.....==.....==......#',
+      '#......===============.......#',
+      '#......==.....==.....==......#',
+      '#..*...==.....==.....==...*..#',
+      '#......==.....==.....==......#',
+      '#..HHHHHHHH...==...HHHHHHHH..#',
+      '#..HHHHHHHH...==...HHHHHHHH..#',
+      '#..HHHHDHHH...==...HHHDHHHH..#',
+      '#......==.....==.....==......#',
+      '#......================......#',
+      '#......==.....==.....==......#',
+      '#..S...==.....==.....==......#',
+      '#.,,,,.==.....==.....==,,,,,.#',
+      '#.,,,,.==.....==.....==,,,,,.#',
+      '#......==.....==.....==......#',
+      '#......==.....==.....==...%%.#',
+      '#######=######################',
+    ],
+    buildings: [
+      { x: 4, y: 2, w: 7, h: 3, roof: 340, wall: 96, door: 7, label: 'מרכז שיקום' },
+      { x: 19, y: 2, w: 7, h: 3, roof: 202, wall: 92, door: 22, label: 'חנות' },
+      { x: 3, y: 10, w: 8, h: 3, roof: 46, wall: 40, door: 7, label: 'אולם המבחן' },
+      { x: 19, y: 10, w: 8, h: 3, roof: 262, wall: 36, door: 22 },
+    ],
+    warps: [
+      { x: 7, y: 21, to: 'route1', tx: 12, ty: 1, dir: 'down' },
+      { x: 14, y: 0, to: 'cave', tx: 12, ty: 22, dir: 'up' },
+      { x: 7, y: 4, to: 'center', tx: 6, ty: 8, dir: 'up' },
+      { x: 22, y: 4, to: 'shop', tx: 5, ty: 7, dir: 'up' },
+      { x: 7, y: 12, to: 'hall', tx: 7, ty: 11, dir: 'up' },
+      { x: 22, y: 12, to: 'house_b', tx: 5, ty: 6, dir: 'up' },
+    ],
+    signs: [
+      { x: 3, y: 16, text: 'סטונברוק — עיר האבן והמבחן.\nמצפון: מערת ההד.' },
+    ],
+    encounters: {
+      grass: [
+        { species: 'nibbly', min: 6, max: 9, weight: 5 },
+        { species: 'buzzlet', min: 6, max: 9, weight: 4 },
+        { species: 'voltpup', min: 7, max: 10, weight: 3 },
+      ],
+    },
+    npcs: [
+      {
+        id: 'cave_guard', x: 14, y: 1, dir: 'down', look: 'guard', name: 'שומר המערה',
+        blockUntil: 'badge1',
+        lines: ['מערת ההד מסוכנת מדי לחסרי ניסיון.',
+                'קודם נצח באולם המבחן — אז אתן לך לעבור.'],
+        linesAfter: ['הוכחת את עצמך. הדרך צפונה פתוחה.'],
+      },
+      {
+        id: 'sb_kid', x: 12, y: 8, dir: 'down', look: 'kid', name: 'ילדה',
+        move: 'wander',
+        lines: ['אמרו לי שמנהיגת האולם משתמשת רק ביצורי סלע ומתכת.',
+                'אולי כדאי לך יצור מסוג מים או צומח?'],
+      },
+      {
+        id: 'sb_villager', x: 25, y: 8, dir: 'left', look: 'villager2', name: 'תושב',
+        lines: ['במרכז השיקום מטפלים בצוות שלך בחינם.', 'שם גם אפשר לשמור את המסע.'],
+      },
+    ],
+    items: [{ x: 27, y: 19, item: 'superpotion', flag: 'item_sb_1' }],
+  },
+
+  center: {
+    name: 'מרכז שיקום', music: 'center', indoor: true,
+    rows: [
+      'HHHHHHHHHHHHHH',
+      'HBBBBMMBBBBBBH',
+      'HttttttttttttH',
+      'HttCCCCttPPttH',
+      'HttttttttttttH',
+      'HttccccttccttH',
+      'HttccccttccttH',
+      'HttttttttttttH',
+      'HttttttttttttH',
+      'HHHHHHdHHHHHHH',
+      'HHHHHHHHHHHHHH',
+    ],
+    warps: [{ x: 6, y: 9, to: 'stonebrook', tx: 7, ty: 5, dir: 'down' }],
+    npcs: [
+      {
+        id: 'nurse', x: 4, y: 2, dir: 'down', look: 'nurse', name: 'אחות',
+        heal: true,
+        lines: ['ברוך הבא למרכז השיקום! שנטפל בצוות שלך?'],
+      },
+      {
+        id: 'saver', x: 10, y: 4, dir: 'left', look: 'clerk', name: 'פקיד רישום',
+        save: true,
+        lines: ['לרשום את ההתקדמות שלך ביומן המסע?'],
+      },
+      {
+        id: 'center_guest', x: 3, y: 6, dir: 'right', look: 'swimmer', name: 'שחיין',
+        lines: ['יצור מעולף לא צובר ניסיון.', 'החלף אותו לפני שהוא נופל — ככה כולם מתחזקים.'],
+      },
+    ],
+  },
+
+  shop: {
+    name: 'חנות', music: 'center', indoor: true,
+    rows: [
+      'HHHHHHHHHHHH',
+      'HBBBBBBBBBBH',
+      'HffffffffffH',
+      'HffCCCCCCffH',
+      'HffffffffffH',
+      'HffffffffffH',
+      'HffffffffffH',
+      'HffffffffffH',
+      'HHHHHdHHHHHH',
+      'HHHHHHHHHHHH',
+    ],
+    warps: [{ x: 5, y: 8, to: 'stonebrook', tx: 22, ty: 5, dir: 'down' }],
+    npcs: [
+      {
+        id: 'clerk', x: 4, y: 2, dir: 'down', look: 'clerk', name: 'מוכר',
+        shop: true,
+        lines: ['ברוך הבא! מה תרצה לקנות?'],
+      },
+      {
+        id: 'shopper', x: 9, y: 6, dir: 'left', look: 'villager', name: 'קונה',
+        lines: ['ספֵרה כפולה תופסת הרבה יותר טוב מספֵרה רגילה.',
+                'שווה את ההפרש במחיר.'],
+      },
+    ],
+  },
+
+  house_b: {
+    name: 'בית בסטונברוק', music: 'town', indoor: true,
+    rows: HOUSE_ROWS,
+    warps: [{ x: 5, y: 7, to: 'stonebrook', tx: 22, ty: 13, dir: 'down' }],
+    npcs: [
+      {
+        id: 'hb_sage', x: 3, y: 4, dir: 'right', look: 'scholar', name: 'חוקרת',
+        lines: ['יצורים רבים משנים צורה כשהם מתחזקים מספיק.',
+                'זה קורה מעצמו — פשוט המשך לאמן אותם.'],
+      },
+      {
+        id: 'hb_gift', x: 8, y: 5, dir: 'left', look: 'elder', name: 'סבתא',
+        lines: ['הדרך צפונה קרה וחשוכה. קח את זה.'],
+        give: { item: 'greatball', count: 2 }, giveFlag: 'gift_greatballs',
+        linesAfter: ['תיזהר במערה, ילד.'],
+      },
+    ],
+  },
+
+  hall: {
+    name: 'אולם המבחן', music: 'battle', indoor: true,
+    rows: [
+      'HHHHHHHHHHHHHHH',
+      'HtttttttttttttH',
+      'HttttcccccttttH',
+      'HttttcccccttttH',
+      'HtttttttttttttH',
+      'HtxtttttttttxtH',
+      'HtttttttttttttH',
+      'HttttcccccttttH',
+      'HtttttttttttttH',
+      'HtxtttttttttxtH',
+      'HtttttttttttttH',
+      'HttttcccccttttH',
+      'HHHHHHHdHHHHHHH',
+      'HHHHHHHHHHHHHHH',
+    ],
+    warps: [{ x: 7, y: 12, to: 'stonebrook', tx: 7, ty: 13, dir: 'down' }],
+    npcs: [
+      {
+        id: 'hall_a', x: 3, y: 8, dir: 'right', look: 'trainer', name: 'מתמודד ניר',
+        sight: 3, flag: 'trainer_hall_a',
+        trainer: {
+          intro: 'ניר: לא עוברים אותי בקלות!',
+          defeat: 'ניר: אתה באמת מוכן למנהיגה.',
+          reward: 400,
+          team: [{ species: 'rockle', level: 11 }, { species: 'cogling', level: 12 }],
+        },
+        linesAfter: ['ניר: תשמור על יצור מסוג מים לקרב הבא.'],
+      },
+      {
+        id: 'hall_b', x: 11, y: 5, dir: 'left', look: 'hiker', name: 'מתמודדת שיר',
+        sight: 3, flag: 'trainer_hall_b',
+        trainer: {
+          intro: 'שיר: ההגנה שלי כמו חומה.',
+          defeat: 'שיר: החומה נבקעה…',
+          reward: 400,
+          team: [{ species: 'sandclaw', level: 12 }, { species: 'rockle', level: 12 }],
+        },
+        linesAfter: ['שיר: מהלכים מיוחדים עוברים דרך הגנה גבוהה.'],
+      },
+      {
+        id: 'leader', x: 7, y: 2, dir: 'down', look: 'guard', name: 'מנהיגת האולם דנה',
+        leader: true, flag: 'badge1',
+        lines: ['דנה: אני דנה, מנהיגת אולם המבחן.',
+                'הצוות שלי בנוי מאבן ומתכת. תראה לי שאתה יכול לשבור אותו.'],
+        trainer: {
+          intro: 'דנה: שנתחיל?',
+          defeat: 'דנה: יפה מאוד. עברת את המבחן.',
+          reward: 1200,
+          team: [
+            { species: 'rockle', level: 13 },
+            { species: 'sandclaw', level: 14 },
+            { species: 'boulderon', level: 16 },
+          ],
+        },
+        linesAfter: ['דנה: השומר בצפון כבר יודע. הדרך למערת ההד פתוחה בפניך.'],
+        award: { flag: 'badge1', item: 'superpotion', count: 2 },
+      },
+    ],
+  },
+
+  // ============================================================== CAVE ====
+  cave: {
+    name: 'מערת ההד', music: 'cave', cave: true,
+    rows: [
+      '^^^^^^^^^^^^r^^^^^^^^^^^^^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;^^^;;;;;rr;;;;;^^^;;;^',
+      '^;;;^^^;;;;;rr;;;;;^^^;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^^^^^;;;^^^^rr^^^^;;;^^^^^',
+      '^;;;;;;;^^^^rr^^^^;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;O;;;;;;;;rr;;;;;;;;O;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^^^^;;;;;;;;rr;;;;;;;;^^^^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;^^^^^;rr;^^^^^;;;;;^',
+      '^;;;;;^^^^^;rr;^^^^^;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^^^^^^^;;;;;rr;;;;;^^^^^^^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;^^^;;;;;rr;;;;;^^^;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^;;;;;;;;;;;rr;;;;;;;;;;;^',
+      '^^^^^^^^^^^^r^^^^^^^^^^^^^',
+    ],
+    warps: [
+      { x: 12, y: 23, to: 'stonebrook', tx: 14, ty: 1, dir: 'down' },
+      { x: 12, y: 0, to: 'route2', tx: 14, ty: 18, dir: 'up' },
+    ],
+    encounters: {
+      cave: [
+        { species: 'rockle', min: 10, max: 14, weight: 5 },
+        { species: 'cogling', min: 10, max: 14, weight: 4 },
+        { species: 'shadewisp', min: 11, max: 15, weight: 4 },
+        { species: 'sandclaw', min: 11, max: 15, weight: 3 },
+        { species: 'magmite', min: 12, max: 16, weight: 2 },
+        { species: 'gloomoth', min: 12, max: 16, weight: 1 },
+      ],
+    },
+    npcs: [
+      {
+        id: 't_cave_a', x: 5, y: 12, dir: 'right', look: 'hiker', name: 'כורה עידו',
+        sight: 4, flag: 'trainer_cave_a',
+        trainer: {
+          intro: 'עידו: אף אחד לא עובר במנהרה שלי בחינם.',
+          defeat: 'עידו: קח, הרווחת את זה.',
+          reward: 620,
+          team: [{ species: 'boulderon', level: 16 }, { species: 'magmite', level: 16 }],
+        },
+        linesAfter: ['עידו: בצפון יש נתיב פתוח. תיזהר מהסופות.'],
+      },
+      {
+        id: 't_cave_b', x: 19, y: 18, dir: 'left', look: 'scholar', name: 'חוקר רן',
+        sight: 4, flag: 'trainer_cave_b',
+        trainer: {
+          intro: 'רן: אני חוקר יצורי צל. בוא נאסוף נתונים!',
+          defeat: 'רן: נתונים מרתקים. תודה על הקרב.',
+          reward: 640,
+          team: [{ species: 'shadewisp', level: 15 }, { species: 'gloomoth', level: 17 }],
+        },
+        linesAfter: ['רן: יצורי צל חלשים מול אור. תזכור את זה בפסגה.'],
+      },
+    ],
+    items: [
+      { x: 3, y: 5, item: 'revive', flag: 'item_cave_1' },
+      { x: 22, y: 15, item: 'greatball', flag: 'item_cave_2' },
+      { x: 8, y: 21, item: 'hyperpotion', flag: 'item_cave_3' },
+    ],
+  },
+
+  // ============================================================= ROUTE 2 ==
+  route2: {
+    name: 'נתיב 2', music: 'route', outdoor: true,
+    rows: [
+      '##############=###############',
+      '#.............==.............#',
+      '#..,,,,,......==......,,,,,..#',
+      '#..,,,,,......==......,,,,,..#',
+      '#..,,,,,......==......,,,,,..#',
+      '#.............==.............#',
+      '#...####......==......####...#',
+      '#...####......==......####...#',
+      '#.............==.............#',
+      '#......=================.....#',
+      '#......==.....==......==.....#',
+      '#..,,,,==.....==......==,,,..#',
+      '#..,,,,==.....==......==,,,..#',
+      '#......==.....==......==.....#',
+      '#...S..==.....==......==.....#',
+      '#......==.....==......==.....#',
+      '#~~~~..==.....==......==..~~~#',
+      '#~~~~..==.....==......==..~~~#',
+      '#......==.....==......==.....#',
+      '##############=###############',
+    ],
+    warps: [
+      { x: 14, y: 19, to: 'cave', tx: 12, ty: 22, dir: 'down' },
+      { x: 14, y: 0, to: 'summit', tx: 10, ty: 16, dir: 'up' },
+    ],
+    signs: [
+      { x: 4, y: 14, text: 'נתיב 2 — צפונה: פסגת האורות.\nרק מאמנים מנוסים ממשיכים מכאן.' },
+    ],
+    encounters: {
+      grass: [
+        { species: 'chompadge', min: 16, max: 20, weight: 4 },
+        { species: 'skytalon', min: 16, max: 20, weight: 4 },
+        { species: 'brawlkin', min: 16, max: 20, weight: 3 },
+        { species: 'slimeel', min: 16, max: 20, weight: 3 },
+        { species: 'terrapod', min: 17, max: 21, weight: 2 },
+        { species: 'puffbloom', min: 17, max: 21, weight: 2 },
+        { species: 'coralux', min: 18, max: 22, weight: 1 },
+      ],
+    },
+    npcs: [
+      {
+        id: 't_r2_a', x: 10, y: 4, dir: 'right', look: 'trainer', name: 'מאמנת אורית',
+        sight: 5, flag: 'trainer_r2_a',
+        trainer: {
+          intro: 'אורית: הגעת רחוק. נראה כמה רחוק.',
+          defeat: 'אורית: מרשים. הפסגה מחכה לך.',
+          reward: 900,
+          team: [{ species: 'arcfang', level: 20 }, { species: 'nectrix', level: 20 }],
+        },
+        linesAfter: ['אורית: בפסגה מרחף משהו שאף אחד לא הצליח לתפוס.'],
+      },
+      {
+        id: 't_r2_b', x: 25, y: 12, dir: 'left', look: 'swimmer', name: 'שחיינית טל',
+        sight: 4, flag: 'trainer_r2_b',
+        trainer: {
+          intro: 'טל: בואו נעשה גלים!',
+          defeat: 'טל: הגל שלך היה גדול יותר.',
+          reward: 860,
+          team: [{ species: 'marisel', level: 19 }, { species: 'slimeel', level: 20 }],
+        },
+        linesAfter: ['טל: שיקוי היפר בכיס שווה יותר מכל טקטיקה.'],
+      },
+    ],
+    items: [
+      { x: 4, y: 3, item: 'ultraball', flag: 'item_r2_1' },
+      { x: 27, y: 4, item: 'ether', flag: 'item_r2_2' },
+    ],
+  },
+
+  // ============================================================== SUMMIT ==
+  summit: {
+    name: 'פסגת האורות', music: 'cave', outdoor: true,
+    rows: [
+      '^^^^^^^^^^^^^^^^^^^^^^',
+      '^....................^',
+      '^...^^^^......^^^^...^',
+      '^...^^^^......^^^^...^',
+      '^....................^',
+      '^......,,,,,,,,......^',
+      '^......,,,,,,,,......^',
+      '^......,,,,,,,,......^',
+      '^....................^',
+      '^..^^....^^^^....^^..^',
+      '^..^^....^^^^....^^..^',
+      '^....................^',
+      '^.......,,,,,,.......^',
+      '^.......,,,,,,.......^',
+      '^....................^',
+      '^........====........^',
+      '^........====........^',
+      '^^^^^^^^^^=^^^^^^^^^^^',
+    ],
+    warps: [{ x: 10, y: 17, to: 'route2', tx: 14, ty: 1, dir: 'down' }],
+    encounters: {
+      grass: [
+        { species: 'gloomoth', min: 22, max: 26, weight: 4 },
+        { species: 'terrapod', min: 22, max: 26, weight: 3 },
+        { species: 'nectrix', min: 23, max: 27, weight: 3 },
+        { species: 'glacierra', min: 24, max: 28, weight: 2 },
+        { species: 'stormcrest', min: 25, max: 29, weight: 1 },
+      ],
+    },
+    npcs: [
+      {
+        id: 'apex', x: 10, y: 3, dir: 'down', look: 'elder', name: 'איתריון',
+        staticBattle: { species: 'aetherion', level: 30 }, flag: 'apex_done',
+        hidden: true, orb: true,
+        lines: ['אור עז מרחף מעל הסלע…'],
+        linesAfter: ['הרוח בפסגה שקטה עכשיו.'],
+      },
+      {
+        id: 'summit_sage', x: 4, y: 14, dir: 'right', look: 'elder', name: 'נזיר הפסגה',
+        lines: ['הגעת עד לכאן. מעטים מגיעים.',
+                'מעל הסלע השחור מרחף איתריון — לב הסופה.',
+                'החלש אותו היטב לפני שתנסה ללכוד. ספֵרת עילית לא תזיק.'],
+      },
+    ],
+    items: [{ x: 19, y: 12, item: 'ultraball', flag: 'item_summit_1' }],
+  },
+};
+
+export const START = { map: 'home', x: 5, y: 5, dir: 'down' };

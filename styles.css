@@ -1,0 +1,87 @@
+:root{
+  --bg-0:#070a12;
+  --bg-1:#101728;
+  --accent:#57d1c9;
+  --accent-2:#f0a35e;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background:
+    radial-gradient(1200px 800px at 50% -10%, #1d2b45 0%, transparent 60%),
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+  color:#dce6f5;
+  font-family:"Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  display:flex; align-items:center; justify-content:center;
+  overflow:hidden;
+  touch-action:none;
+  -webkit-user-select:none; user-select:none;
+}
+#app{
+  width:100%; height:100%;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:10px; padding:10px;
+}
+#stage{
+  position:relative;
+  line-height:0;
+  border-radius:16px;
+  overflow:hidden;
+  box-shadow:
+    0 0 0 2px rgba(120,160,220,.18),
+    0 30px 80px rgba(0,0,0,.65),
+    0 0 120px rgba(60,120,200,.12);
+}
+canvas#game{
+  display:block;
+  image-rendering:auto;
+  background:#0b1020;
+  max-width:100%;
+  max-height:100%;
+}
+#overlay{position:absolute; inset:0; pointer-events:none}
+#boot{
+  position:absolute; inset:0;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:6px;
+  background:linear-gradient(180deg,#0d1426,#070a12);
+  transition:opacity .5s ease;
+}
+#boot.hidden{opacity:0}
+.boot-logo{
+  font-size:clamp(34px,6vw,64px); letter-spacing:.34em;
+  font-weight:800;
+  background:linear-gradient(180deg,#fff,#6ec9ff 60%,#2b6ea8);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+  line-height:1.1;
+}
+.boot-sub{font-size:14px; letter-spacing:.5em; color:#7f9dc4; line-height:1.4}
+.boot-hint{margin-top:18px; font-size:13px; color:#5b76a0}
+
+/* ---- touch controls ---- */
+#touch{
+  display:none;
+  width:100%; max-width:960px;
+  justify-content:space-between; align-items:flex-end;
+  padding:0 8px 6px;
+}
+@media (pointer:coarse){ #touch{display:flex} }
+.dpad{position:relative; width:150px; height:150px}
+.dp,.act{
+  position:absolute;
+  background:linear-gradient(180deg,#26314a,#161d2e);
+  color:#9fb6d6; border:1px solid rgba(140,180,230,.25);
+  border-radius:14px; font-size:18px;
+  box-shadow:0 4px 0 rgba(0,0,0,.45);
+  touch-action:none;
+}
+.dp:active,.act:active{transform:translateY(3px); box-shadow:none; background:#2f3d5c}
+.dp{width:50px;height:50px}
+.dp.up{left:50px;top:0}.dp.down{left:50px;top:100px}
+.dp.left{left:0;top:50px}.dp.right{left:100px;top:50px}
+.acts{position:relative; width:170px; height:150px}
+.act{width:64px;height:64px;border-radius:50%;font-weight:800;font-size:20px}
+.act.a{right:0;bottom:14px;color:#0d1626;background:linear-gradient(180deg,#7ee0d6,#2e9c94)}
+.act.b{right:74px;bottom:52px;color:#0d1626;background:linear-gradient(180deg,#f5b783,#c9703a)}
+.act.st{right:16px;bottom:96px;width:46px;height:30px;border-radius:10px;font-size:14px}
