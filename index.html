@@ -13,7 +13,13 @@
     <div id="stage">
       <canvas id="game" width="960" height="640"></canvas>
       <div id="overlay">
-        <div id="boot">
+        <!-- Real text field for name entry: the browser handles Hebrew, IME,
+           paste and caret movement, and it pops the keyboard on touch devices.
+           It is invisible; the name is drawn on the canvas. -->
+      <input id="nameInput" type="text" maxlength="12" autocomplete="off"
+             autocorrect="off" autocapitalize="off" spellcheck="false"
+             aria-label="שם המאמן" />
+      <div id="boot">
           <div class="boot-logo">AURELIA</div>
           <div class="boot-sub">Monster Quest</div>
           <div class="boot-hint">טוען…</div>

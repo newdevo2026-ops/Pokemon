@@ -11,10 +11,15 @@ const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left',
   ArrowRight: 'right', KeyD: 'right',
   KeyZ: 'a', Enter: 'a', Space: 'a',
-  KeyX: 'b', Escape: 'b', Backspace: 'b',
+  KeyX: 'b', Escape: 'b',
   ShiftLeft: 'run', ShiftRight: 'run',
   Tab: 'start', KeyM: 'mute',
 };
+
+// While the player is typing, letter keys must reach the text field instead of
+// firing game actions — otherwise a name like "Max" would mute the game, walk
+// left and back out of the screen. Only Enter and Escape stay bound.
+const TEXT_MODE_KEYS = { Enter: 'a', Escape: 'b' };
 
 export class Input {
   constructor(target = window) {
@@ -22,19 +27,21 @@ export class Input {
     this.justDown = new Set();
     this.justUp = new Set();
     this.anyKeySince = 0;
+    this.textMode = false;
 
     target.addEventListener('keydown', (e) => {
-      const a = KEYMAP[e.code];
+      if (e.code === 'Tab') e.preventDefault();   // never let focus jump away
+      const a = this.textMode ? TEXT_MODE_KEYS[e.code] : KEYMAP[e.code];
       if (!a) return;
-      e.preventDefault();
+      if (!this.textMode) e.preventDefault();
       if (!this.down.has(a)) this.justDown.add(a);
       this.down.add(a);
       this.anyKeySince++;
     });
     target.addEventListener('keyup', (e) => {
-      const a = KEYMAP[e.code];
+      const a = this.textMode ? TEXT_MODE_KEYS[e.code] : KEYMAP[e.code];
       if (!a) return;
-      e.preventDefault();
+      if (!this.textMode) e.preventDefault();
       this.down.delete(a);
       this.justUp.add(a);
     });

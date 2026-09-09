@@ -1,6 +1,6 @@
 // Title screen, new-game setup (name + look) and the save/continue entry point.
 
-import { panel, drawText, selection, vignette } from '../gfx/ui.js';
+import { panel, drawText, selection, vignette, measure } from '../gfx/ui.js';
 import { drawMonster } from '../gfx/monster.js';
 import { drawActor } from '../gfx/actor.js';
 import { SPECIES_IDS } from '../data/species.js';
@@ -41,16 +41,62 @@ export class TitleScreen {
         s: 90 + rng() * 90, sp: 8 + rng() * 22, ph: rng() * 6.28,
       });
     }
-    this._onKey = (e) => this.onKey(e);
-    window.addEventListener('keydown', this._onKey);
+    this.field = document.getElementById('nameInput');
+    // Enter and Escape stay mapped as game actions while typing, so update()
+    // is the single place that acts on them — no second listener here.
+    this._keepFocus = () => {
+      if (this.page === 'name') this.field?.focus();
+    };
+    this.game.canvas?.addEventListener('pointerdown', this._keepFocus);
   }
 
-  destroy() { window.removeEventListener('keydown', this._onKey); }
+  destroy() {
+    this.game.canvas?.removeEventListener('pointerdown', this._keepFocus);
+    this.stopTyping();
+  }
 
-  onKey(e) {
-    if (this.page !== 'name') return;
-    if (e.key === 'Backspace') { this.name = this.name.slice(0, -1); e.preventDefault(); return; }
-    if (e.key.length === 1 && this.name.length < 10 && e.key !== ' ') this.name += e.key;
+  /** Hand the keyboard to the text field and stop the game reading key actions. */
+  startTyping(initial) {
+    if (!this.field) { this.name = initial; return; }
+    this.field.value = initial;
+    this.field.classList.add('on');
+    this.game.input.textMode = true;
+    this.game.input.clear();
+    // focus has to happen after the current input event finishes
+    // Select the suggestion so the first keystroke replaces it, the way any
+    // rename field behaves.
+    setTimeout(() => {
+      this.field.focus();
+      this.field.select();
+    }, 0);
+  }
+
+  stopTyping() {
+    if (!this.field) return;
+    this.field.blur();
+    this.field.classList.remove('on');
+    if (this.game.input) this.game.input.textMode = false;
+  }
+
+  setPage(page) {
+    if (page === 'name') this.startTyping(this.name || LOOK_CHOICES[this.lookIndex].label);
+    else this.stopTyping();
+    this.page = page;
+    if (page !== 'name') this.audio.sfx('back');
+    // Escape is consumed by leaving the field; don't let the page we land on
+    // act on the same press.
+    this.game.input.justDown.delete('b');
+    this.game.input.justDown.delete('a');
+  }
+
+  confirmName() {
+    if (this.confirmed) return;
+    const name = (this.name || '').trim();
+    if (!name) { this.audio.sfx('bump'); this.nameError = 1.4; return; }
+    this.confirmed = true;
+    this.audio.sfx('select');
+    this.stopTyping();
+    this.game.newGame(name, LOOK_CHOICES[this.lookIndex].id);
   }
 
   update(dt, input) {
@@ -68,7 +114,7 @@ export class TitleScreen {
         this.audio.sfx('select');
         const id = this.items[this.cursor].id;
         if (id === 'continue') this.game.continueGame();
-        else if (id === 'new') { this.page = 'look'; this.lookIndex = 0; }
+        else if (id === 'new') { this.lookIndex = 0; this.name = ''; this.page = 'look'; }
         else this.page = 'about';
       }
       return;
@@ -83,18 +129,19 @@ export class TitleScreen {
       if (input.pressed('b')) { this.audio.sfx('back'); this.page = 'main'; }
       if (input.pressed('a')) {
         this.audio.sfx('select');
-        this.name = LOOK_CHOICES[this.lookIndex].label;
-        this.page = 'name';
+        // Only suggest a default when nothing has been typed yet, so stepping
+        // back and forward does not discard the player's name.
+        if (!this.name.trim()) this.name = LOOK_CHOICES[this.lookIndex].label;
+        this.setPage('name');
       }
       return;
     }
     if (this.page === 'name') {
-      if (input.pressed('b')) { this.audio.sfx('back'); this.page = 'look'; return; }
-      if (input.pressed('a')) {
-        this.audio.sfx('select');
-        this.game.newGame(this.name.trim() || LOOK_CHOICES[this.lookIndex].label,
-                          LOOK_CHOICES[this.lookIndex].id);
-      }
+      // The field owns the text; mirror it so the canvas can draw it.
+      if (this.field) this.name = this.field.value;
+      if (this.nameError > 0) this.nameError -= dt;
+      if (input.pressed('b')) { this.setPage('look'); return; }
+      if (input.pressed('a')) this.confirmName();
     }
   }
 
@@ -170,14 +217,28 @@ export class TitleScreen {
         drawText(ctx, look.label, 720, 470, { size: 24 });
         drawText(ctx, `${LEFT} ${RIGHT} להחלפה · Z לאישור`, 720, 508, { size: 15, color: '#7f9dc4' });
       } else {
-        const boxW = 360;
-        panel(ctx, 480 - boxW / 2, 440, boxW, 56, {
-          radius: 12, shadow: false, colors: ['rgba(12,20,36,.95)', 'rgba(8,14,26,.96)'],
+        const boxW = 380, boxX = 480 - boxW / 2, boxY = 436;
+        const bad = this.nameError > 0;
+        panel(ctx, boxX, boxY, boxW, 58, {
+          radius: 12, shadow: false,
+          colors: ['rgba(12,20,36,.96)', 'rgba(8,14,26,.97)'],
+          border: bad ? 'rgba(255,120,110,.9)' : 'rgba(140,210,255,.55)',
+          borderWidth: bad ? 3 : 2,
         });
-        const shown = this.name + (Math.floor(this.t * 2) % 2 ? '|' : '');
-        drawText(ctx, shown.trim() ? shown : 'הקלד שם…', 480 + boxW / 2 - 20, 478,
-          { size: 24, color: this.name ? '#fff' : '#5b76a0' });
-        drawText(ctx, 'הקלד · Enter לאישור · X לחזרה', 720, 522, { size: 15, color: '#7f9dc4' });
+        const text = this.name;
+        const right = boxX + boxW - 20;
+        drawText(ctx, text || 'הקלד שם…', right, boxY + 39,
+          { size: 25, color: text ? '#fff' : '#5b76a0' });
+        // caret drawn at the text edge, so it never disturbs the RTL layout
+        if (Math.floor(this.t * 2) % 2 === 0) {
+          const w = text ? measure(ctx, text, 25) : 0;
+          ctx.fillStyle = '#8fe8ff';
+          ctx.fillRect(right - w - 9, boxY + 16, 2.5, 28);
+        }
+        drawText(ctx, `${text.length}/12`, boxX + 18, boxY + 39,
+          { size: 15, color: '#5b76a0', align: 'left', dir: 'ltr' });
+        drawText(ctx, bad ? 'צריך שם כדי להתחיל' : 'הקלד את השם · Enter לאישור · Esc לחזרה',
+          720, boxY + 86, { size: 15, color: bad ? '#ff9a90' : '#7f9dc4' });
       }
     }
 
