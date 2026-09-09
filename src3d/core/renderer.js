@@ -13,7 +13,7 @@ layout(location=2) in vec3 aColor;
 uniform mat4 uViewProj;
 uniform mat4 uModel;
 flat out vec3 vNormal;
-flat out vec3 vColor;
+out vec3 vColor;
 out float vDepth;
 out vec3 vWorld;
 void main() {
@@ -29,7 +29,7 @@ void main() {
 const FRAG = `#version 300 es
 precision highp float;
 flat in vec3 vNormal;
-flat in vec3 vColor;
+in vec3 vColor;
 in float vDepth;
 in vec3 vWorld;
 uniform vec3 uLightDir;
@@ -47,10 +47,11 @@ void main() {
   // Hemisphere ambient: sky above, bounced ground light below.
   float hemi = n.y * 0.5 + 0.5;
   vec3 ambient = mix(uGroundColor, uSkyColor, hemi);
-  vec3 lit = vColor * uTint * (ambient + lambert * 0.85);
+  vec3 warm = vec3(1.06, 1.0, 0.90);
+  vec3 lit = vColor * uTint * (ambient + lambert * 0.95 * warm);
   lit = mix(lit, vColor * uTint, uEmissive);
   float fog = clamp((vDepth - uFogRange.x) / (uFogRange.y - uFogRange.x), 0.0, 1.0);
-  fragColor = vec4(mix(lit, uFogColor, fog * 0.9), uAlpha);
+  fragColor = vec4(mix(lit, uFogColor, fog * 0.75), uAlpha);
 }`;
 
 function compile(gl, type, src) {
@@ -88,7 +89,10 @@ export class Mesh {
 
 export class Renderer {
   constructor(canvas) {
-    const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
+    // alpha:true lets a CSS sky gradient show through behind the scene, which
+    // is far cheaper than rendering a sky dome and looks better than a flat
+    // clear colour.
+    const gl = canvas.getContext('webgl2', { antialias: true, alpha: true, premultipliedAlpha: false });
     if (!gl) throw new Error('WebGL 2 is not available in this browser');
     this.gl = gl;
     this.canvas = canvas;
@@ -118,11 +122,13 @@ export class Renderer {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    this.sky = [0.42, 0.50, 0.62];
-    this.ground = [0.20, 0.20, 0.16];
-    this.fog = [0.62, 0.78, 0.92];
-    this.fogRange = [40, 130];
-    this.lightDir = this.normalize([0.45, 0.82, 0.36]);
+    // Warm key light, cool sky fill: the classic outdoor pairing that stops
+    // flat-shaded geometry from looking like plastic.
+    this.sky = [0.44, 0.52, 0.66];
+    this.ground = [0.24, 0.21, 0.16];
+    this.fog = [0.78, 0.87, 0.95];
+    this.fogRange = [70, 210];
+    this.lightDir = this.normalize([0.42, 0.80, 0.44]);
   }
 
   normalize(v) {
@@ -132,16 +138,19 @@ export class Renderer {
 
   mesh(data) { return new Mesh(this.gl, data); }
 
+  /** `dpr` is the display ratio; we render above it and let the browser
+   *  downscale, which is what actually removes the stair-stepping. */
   resize(w, h, dpr = 1) {
-    this.canvas.width = Math.floor(w * dpr);
-    this.canvas.height = Math.floor(h * dpr);
+    const ss = Math.min(2.6, dpr * 1.6);
+    this.canvas.width = Math.floor(w * ss);
+    this.canvas.height = Math.floor(h * ss);
     this.aspect = w / h;
   }
 
   beginFrame(camera) {
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(this.fog[0], this.fog[1], this.fog[2], 1);
+    gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     mat4.perspective(this.proj, camera.fov, this.aspect, 0.5, 400);

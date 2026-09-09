@@ -5,7 +5,12 @@ html, body {
   touch-action: none; -webkit-user-select: none; user-select: none;
 }
 canvas { position: absolute; display: block; border-radius: 10px; }
-#gl { z-index: 1; }
+/* Sky sits behind the scene as a CSS gradient; the renderer clears to
+   transparent so it shows through. */
+#gl {
+  z-index: 1;
+  background: linear-gradient(180deg, #5aa8e0 0%, #8fc9ee 42%, #bfe2f4 74%, #d8eef4 100%);
+}
 #ui { z-index: 2; pointer-events: none; }
 #nameInput {
   position: absolute; left: 50%; top: 70%; z-index: 3;

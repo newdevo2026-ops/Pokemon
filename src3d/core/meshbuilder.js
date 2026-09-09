@@ -48,6 +48,24 @@ export class MeshBuilder {
     return this;
   }
 
+  /** Triangle with an independent colour per corner — used by the terrain so
+   *  materials fade into each other instead of meeting at a hard tile edge. */
+  triC(a, b, c, ca, cb, cc) {
+    const s = this.stack;
+    s.apply(P, a[0], a[1], a[2]);
+    s.apply(Q, b[0], b[1], b[2]);
+    s.apply(R, c[0], c[1], c[2]);
+    const ux = Q[0]-P[0], uy = Q[1]-P[1], uz = Q[2]-P[2];
+    const vx = R[0]-P[0], vy = R[1]-P[1], vz = R[2]-P[2];
+    let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    this.pos.push(P[0],P[1],P[2], Q[0],Q[1],Q[2], R[0],R[1],R[2]);
+    this.norm.push(nx,ny,nz, nx,ny,nz, nx,ny,nz);
+    this.col.push(ca[0],ca[1],ca[2], cb[0],cb[1],cb[2], cc[0],cc[1],cc[2]);
+    return this;
+  }
+
   quad(a, b, c, d, color) {
     this.tri(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2], color);
     this.tri(a[0],a[1],a[2], c[0],c[1],c[2], d[0],d[1],d[2], color);
