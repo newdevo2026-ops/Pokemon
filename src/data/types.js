@@ -14,24 +14,26 @@ export const TYPES = {
   lumen:   { name: 'אור',     en: 'Lumen',   hue: 320, color: '#f28ab8' },
   metal:   { name: 'מתכת',    en: 'Metal',   hue: 210, color: '#9aa8b8' },
   beast:   { name: 'חיה',     en: 'Beast',   hue: 8,   color: '#c9603f' },
+  bug:     { name: 'חרק',      en: 'Bug',     hue: 75,  color: '#9dbf3c' },
 };
 
 export const TYPE_IDS = Object.keys(TYPES);
 
 // attacker -> { defender: multiplier }.  Anything omitted is 1x.
 const X = {
-  ember:   { verdant: 2, frost: 2, metal: 2, aqua: .5, stone: .5, ember: .5 },
+  ember:   { verdant: 2, frost: 2, metal: 2, bug: 2, aqua: .5, stone: .5, ember: .5 },
   aqua:    { ember: 2, stone: 2, aqua: .5, verdant: .5, volt: .5 },
-  verdant: { aqua: 2, stone: 2, verdant: .5, ember: .5, toxic: .5, gale: .5, metal: .5 },
+  verdant: { aqua: 2, stone: 2, verdant: .5, ember: .5, toxic: .5, gale: .5, metal: .5, bug: .5 },
   volt:    { aqua: 2, gale: 2, verdant: .5, volt: .5, stone: 0 },
   frost:   { verdant: 2, gale: 2, beast: 2, ember: .5, aqua: .5, frost: .5, metal: .5 },
-  stone:   { ember: 2, volt: 2, toxic: 2, metal: 2, verdant: .5, aqua: .5 },
-  gale:    { verdant: 2, beast: 2, volt: .5, stone: .5, metal: .5 },
-  toxic:   { verdant: 2, lumen: 2, stone: .5, toxic: .5, metal: 0 },
+  stone:   { ember: 2, volt: 2, toxic: 2, metal: 2, bug: 2, verdant: .5, aqua: .5 },
+  gale:    { verdant: 2, beast: 2, bug: 2, volt: .5, stone: .5, metal: .5 },
+  toxic:   { verdant: 2, lumen: 2, stone: .5, toxic: .5, bug: .5, metal: 0 },
   umbra:   { lumen: 2, umbra: 2, beast: .5, metal: .5 },
-  lumen:   { toxic: 2, beast: 2, umbra: .5, metal: .5, lumen: .5 },
-  metal:   { frost: 2, stone: 2, lumen: 2, ember: .5, aqua: .5, volt: .5, metal: .5 },
-  beast:   { neutral: 2, frost: 2, stone: 2, metal: 2, umbra: 2, gale: .5, toxic: .5, lumen: 0 },
+  lumen:   { toxic: 2, beast: 2, umbra: .5, metal: .5, lumen: .5, bug: .5 },
+  metal:   { frost: 2, stone: 2, lumen: 2, ember: .5, aqua: .5, volt: .5, metal: .5, bug: .5 },
+  beast:   { neutral: 2, frost: 2, stone: 2, metal: 2, umbra: 2, gale: .5, toxic: .5, bug: .5, lumen: 0 },
+  bug:     { verdant: 2, lumen: 2, umbra: 2, ember: .5, beast: .5, gale: .5, toxic: .5, metal: .5, stone: .5 },
   neutral: { stone: .5, metal: .5, umbra: .5 },
 };
 

@@ -490,9 +490,10 @@ export class Overworld {
     const t = npc.trainer;
     let team = t.team;
     if (t.dynamicTeam === 'rivalStarter') {
-      const mine = this.state.data.starter || 'emberkit';
-      const counter = { emberkit: 'dewlet', dewlet: 'sprigling', sprigling: 'emberkit' }[mine];
-      team = [{ species: 'nibbly', level: 5 }, { species: counter, level: 6 }];
+      // The rival always picks the starter that answers yours.
+      const mine = this.state.data.starter || 'bytec';
+      const counter = { bytec: 'cookiz', pingui: 'bytec', cookiz: 'pingui' }[mine] || 'keyvi';
+      team = [{ species: 'keyvi', level: 5 }, { species: counter, level: 6 }];
     }
     const foeParty = team.map((m) => createCreature(m.species, m.level, { met: 'trainer' }));
     this.pendingTrainer = npc;

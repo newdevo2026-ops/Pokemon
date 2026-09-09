@@ -89,6 +89,14 @@ export const MOVES = {
   gearblade:  M('gearblade', 'להב גלגלים', 'Gear Blade', 'metal', 'physical', 90, 90, 10, 'slash', { eff: { critBoost: 1 } }),
   platearmor: M('platearmor', 'שריון לוחות', 'Plate Armor', 'metal', 'status', 0, null, 15, 'buff', { eff: { stat: { who: 'self', stat: 'def', stages: 2 } } }),
 
+  // --- bug ---------------------------------------------------------------
+  bugbite:    M('bugbite', 'נשיכת חרק', 'Bug Bite', 'bug', 'physical', 60, 100, 20, 'bite'),
+  swarmvolley:M('swarmvolley', 'מטח נחיל', 'Swarm Volley', 'bug', 'physical', 25, 95, 20, 'impact', { eff: { multi: [2, 5] } }),
+  silkbind:   M('silkbind', 'כבל משי', 'Silk Bind', 'bug', 'status', 0, 95, 20, 'buff', { eff: { stat: { who: 'foe', stat: 'spe', stages: -2 } } }),
+  carapace:   M('carapace', 'שריון קשקש', 'Carapace', 'bug', 'status', 0, null, 20, 'buff', { eff: { stat: { who: 'self', stat: 'def', stages: 1 }, statSelf2: { stat: 'spd', stages: 1 } } }),
+  hivebeam:   M('hivebeam', 'קרן נחיל', 'Hive Beam', 'bug', 'special', 95, 90, 8, 'beam', { eff: { stat: { who: 'foe', stat: 'spa', stages: -1 }, chance: 0.2 } }),
+  pincercrush:M('pincercrush', 'מלתעות', 'Pincer Crush', 'bug', 'physical', 90, 90, 10, 'slash', { eff: { critBoost: 1 } }),
+
   // --- beast -------------------------------------------------------------
   clawrush:   M('clawrush', 'הסתערות טפרים', 'Claw Rush', 'beast', 'physical', 50, 100, 25, 'slash'),
   bodyblow:   M('bodyblow', 'מהלומה', 'Body Blow', 'beast', 'physical', 80, 95, 15, 'impact'),
