@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Aurelia 3D — Monster Quest</title>
+<link rel="stylesheet" href="styles3d.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%234aa7f0'/><path d='M2 16h28' stroke='%23111' stroke-width='3'/><circle cx='16' cy='16' r='5' fill='%23fff' stroke='%23111' stroke-width='3'/></svg>" />
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <canvas id="ui"></canvas>
+  <input id="nameInput" type="text" maxlength="12" autocomplete="off"
+         autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="שם המאמן" />
+  <div id="touch" aria-hidden="true">
+    <div class="dpad">
+      <button data-key="ArrowUp"    class="dp up">▲</button>
+      <button data-key="ArrowLeft"  class="dp left">◀</button>
+      <button data-key="ArrowRight" class="dp right">▶</button>
+      <button data-key="ArrowDown"  class="dp down">▼</button>
+    </div>
+    <div class="acts">
+      <button data-key="KeyX" class="act b">B</button>
+      <button data-key="KeyZ" class="act a">A</button>
+      <button data-key="Enter" class="act st">☰</button>
+    </div>
+  </div>
+  <div id="err"></div>
+<script type="module">
+import { boot } from './src3d/main3d.js';
+try {
+  window.__game = boot(document.getElementById('gl'), document.getElementById('ui'));
+} catch (e) {
+  console.error(e);
+  const el = document.getElementById('err');
+  el.style.display = 'grid';
+  el.textContent = 'שגיאה: ' + e.message;
+}
+</script>
+</body>
+</html>

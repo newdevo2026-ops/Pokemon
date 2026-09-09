@@ -23,10 +23,10 @@ const GROUND = {
   rock:      [[26, 17, 43], [25, 15, 41], [27, 18, 45]],
   water:     [[204, 52, 26]],
   shallow:   [[188, 70, 60]],
-  bridge:    [[28, 44, 44]],
-  wood:      [[28, 44, 42]],
-  tilefloor: [[206, 20, 68]],
-  carpet:    [[348, 52, 44]],
+  bridge:    [[28, 42, 42], [26, 40, 39]],
+  wood:      [[28, 34, 40], [26, 32, 37], [30, 36, 43]],
+  tilefloor: [[206, 16, 66], [206, 14, 62], [208, 18, 70]],
+  carpet:    [[348, 46, 42], [346, 44, 39]],
   void:      [[230, 24, 12]],
 };
 
@@ -45,6 +45,18 @@ function baseHeight(map, x, z, noise) {
   // Towns and interiors stay flat; open ground rolls gently.
   if (['path', 'wood', 'tilefloor', 'carpet', 'bridge'].includes(info.ground)) return 0;
   return (fbm(noise, x / 9, z / 9, 3) - 0.5) * 1.7;
+}
+
+/** Surface under a tile; props and walls borrow the floor around them. */
+function surfaceOf(map, x, z) {
+  const info = map.info(x, z);
+  if (info.inherit) {
+    for (const [dx, dz] of [[-1, 0], [1, 0], [0, 1], [0, -1]]) {
+      const n = map.info(x + dx, z + dz);
+      if (!n.inherit && !n.void && !n.water) return n.ground;
+    }
+  }
+  return info.ground === 'void' ? 'grass' : info.ground;
 }
 
 export class Terrain3D {
@@ -100,8 +112,7 @@ export class Terrain3D {
       for (let x = 0; x < this.w; x++) {
         const info = this.map.info(x, z);
         if (info.void) continue;
-        const mat = info.ground === 'void' ? 'grass' : info.ground;
-        const c = groundColor(mat, x, z);
+        const c = groundColor(surfaceOf(this.map, x, z), x, z);
         const x0 = x * UNIT, x1 = x0 + UNIT, z0 = z * UNIT, z1 = z0 + UNIT;
         const a = [x0, H(x, z), z0], b = [x1, H(x + 1, z), z0];
         const cc = [x1, H(x + 1, z + 1), z1], d = [x0, H(x, z + 1), z1];
@@ -185,6 +196,16 @@ function emitTuft(m, rng) {
   }
 }
 
+/** Interior wall segment. Kept low so an overhead camera can see into the
+ *  room, and only emitted where it actually borders walkable floor — a solid
+ *  block of wall tiles would otherwise fill the screen with grey. */
+function emitWall(m) {
+  const h = 3.0;
+  m.push(); m.translate(0, h / 2, 0);
+  m.box(UNIT, h, UNIT, hsl2rgb(214, 14, 44), hsl2rgb(214, 12, 62));
+  m.pop();
+}
+
 function emitBuilding(m, b) {
   const w = b.w * UNIT, d = b.h * UNIT, wallH = 5.2;
   const wall = hsl2rgb(b.wall > 60 ? 40 : b.wall, 16, 78);
@@ -225,6 +246,25 @@ export function buildProps(map, terrain) {
         case 'bigtree': emitTree(m, rng, true); break;
         case 'boulder': emitRock(m, rng); break;
         case 'cliff': break;   // cliffs are already terrain elevation
+        case 'wall': {
+          const open = [[-1, 0], [1, 0], [0, -1], [0, 1]].some(([dx, dz]) => {
+            const n = map.info(x + dx, z + dz);
+            return !n.solid && !n.void;
+          });
+          if (open) emitWall(m);
+          break;
+        }
+        case 'fence': m.push(); m.translate(0, 0.9, 0); m.box(UNIT, 1.8, 0.5, hsl2rgb(28, 42, 40)); m.pop(); break;
+        case 'sign': {
+          m.push(); m.translate(0, 1.1, 0); m.taper(0.16, 0.14, 1.2, hsl2rgb(26, 44, 30), 5);
+          m.translate(0, 1.2, 0.05); m.box(2.1, 1.3, 0.24, hsl2rgb(32, 46, 48), hsl2rgb(32, 44, 58));
+          m.pop(); break;
+        }
+        case 'counter': m.push(); m.translate(0, 1.1, 0); m.box(UNIT, 2.2, UNIT * 0.8, hsl2rgb(202, 22, 62), hsl2rgb(202, 20, 78)); m.pop(); break;
+        case 'shelf': m.push(); m.translate(0, 1.9, 0); m.box(UNIT, 3.8, UNIT * 0.7, hsl2rgb(26, 40, 34), hsl2rgb(26, 38, 44)); m.pop(); break;
+        case 'machine': m.push(); m.translate(0, 1.5, 0); m.box(UNIT * 0.8, 3.0, UNIT * 0.7, hsl2rgb(200, 18, 78), hsl2rgb(160, 60, 52)); m.pop(); break;
+        case 'pc': m.push(); m.translate(0, 1.0, 0); m.box(UNIT * 0.9, 2.0, UNIT * 0.7, hsl2rgb(210, 16, 40), hsl2rgb(190, 70, 55)); m.pop(); break;
+        case 'crate': m.push(); m.translate(0, 1.0, 0); m.box(UNIT * 0.8, 2.0, UNIT * 0.8, hsl2rgb(30, 44, 42), hsl2rgb(30, 42, 52)); m.pop(); break;
         default:
           if (info.tall) emitTuft(m, rng);
       }

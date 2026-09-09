@@ -42,7 +42,7 @@ export const TILES = {
   'X': { ground: 'path', solid: true, deco: 'crate', inherit: true },
   'D': { ground: 'path', door: true },
   'd': { ground: 'wood', door: true },
-  'H': { ground: 'grass', solid: true, deco: 'wall' },
+  'H': { ground: 'grass', solid: true, deco: 'wall', inherit: true },
   'r': { ground: 'rock' },
   'R': { ground: 'rock', solid: true, deco: 'cliff' },
   ' ': { ground: 'void', solid: true, void: true },

@@ -9,9 +9,8 @@ import { drawActor } from '../gfx/actor.js';
 import { Particles } from '../gfx/particles.js';
 import { panel, drawText, vignette, measure } from '../gfx/ui.js';
 import { getItem } from '../data/items.js';
-import { getSpecies, STARTERS } from '../data/species.js';
-import { typeName } from '../data/types.js';
-import { createCreature, makeWild } from '../game/creature.js';
+import { makeWild } from '../game/creature.js';
+import { talkToNpc, startTrainerBattle, finishTrainerBattle } from '../game/npcActions.js';
 import { clamp, lerp, chance, hsl, easeOutCubic } from '../core/util.js';
 
 const W = 960, H = 640;
@@ -389,120 +388,24 @@ export class Overworld {
 
   talkTo(npc) {
     npc.dir = { up: 'down', down: 'up', left: 'right', right: 'left' }[this.player.dir];
-    this.audio.sfx('cursor');
-    const D = this.game.dialogue;
-    const done = npc.flag && this.state.flag(npc.flag);
-    const after = npc.afterFlag && this.state.flag(npc.afterFlag);
-
-    if (npc.blockUntil) {
-      const opened = this.state.flag(npc.blockUntil);
-      return D.say(opened ? npc.linesAfter : npc.lines, { speaker: npc.name, look: npc.look });
-    }
-    if (npc.starter && !this.state.flag('gotStarter')) return this.starterScene(npc);
-    if (npc.heal) return this.healScene(npc);
-    if (npc.save) {
-      return D.ask(npc.lines, [{ label: 'כן' }, { label: 'לא', cancel: true }], (v) => {
-        if (v === 0) { this.game.save(); this.audio.sfx('levelup'); D.say(['המסע נשמר ביומן.']); }
-      }, { speaker: npc.name, look: npc.look });
-    }
-    if (npc.shop) {
-      return D.say(npc.lines, {
-        speaker: npc.name, look: npc.look,
-        onDone: () => this.game.menus.openShop(),
-      });
-    }
-    if (npc.staticBattle && !this.state.flag(npc.flag)) {
-      return D.say(npc.lines, {
-        speaker: null,
-        onDone: () => {
-          const c = createCreature(npc.staticBattle.species, npc.staticBattle.level);
-          this.state.setFlag(npc.flag);
-          this.npcs = this.npcs.filter((n) => n !== npc);
-          this.audio.sfx('encounter');
-          this.game.startBattle({ kind: 'wild', foeParty: [c], terrain: 'grass' });
-        },
-      });
-    }
-    if (npc.trainer && !done) {
-      if (npc.needs && !this.state.flag(npc.needs)) {
-        return D.say(npc.lines, { speaker: npc.name, look: npc.look });
-      }
-      return D.say([...(npc.lines || []), npc.trainer.intro], {
-        speaker: npc.name, look: npc.look,
-        onDone: () => this.startTrainerBattle(npc),
-      });
-    }
-    if (npc.give && !this.state.flag(npc.giveFlag) &&
-        (!npc.giveNeeds || this.state.flag(npc.giveNeeds))) {
-      const def = getItem(npc.give.item);
-      this.state.addItem(npc.give.item, npc.give.count);
-      this.state.setFlag(npc.giveFlag);
-      this.audio.sfx('levelup');
-      return D.say([...(npc.linesGive || npc.lines), `קיבלת ${def.name} ×${npc.give.count}!`],
-        { speaker: npc.name, look: npc.look });
-    }
-    if (npc.healParty && after) {
-      this.state.healParty();
-      this.audio.sfx('heal');
-      return D.say([...(npc.linesAfter || npc.lines), 'הצוות שלך התרענן במלואו.'],
-        { speaker: npc.name, look: npc.look });
-    }
-    const lines = (done || after) ? (npc.linesAfter || npc.lines) : npc.lines;
-    return D.say(lines, { speaker: npc.name, look: npc.look });
+    talkToNpc(this.npcHost(), npc);
   }
 
-  starterScene(npc) {
-    const D = this.game.dialogue;
-    D.ask(npc.lines, STARTERS.map((id) => {
-      const sp = getSpecies(id);
-      return { label: `${sp.name} · ${sp.types.map(typeName).join(' / ')}`, value: id };
-    }), (id) => {
-      const sp = getSpecies(id);
-      D.ask([`${sp.name}? ${sp.flavor}`, 'זו הבחירה שלך?'],
-        [{ label: 'כן, זה שלי!' }, { label: 'רגע, אחשוב שוב', cancel: true }], (yes) => {
-          if (yes !== 0) return this.starterScene(npc);
-          const c = createCreature(id, 5, { met: 'starter' });
-          this.state.addToParty(c);
-          this.state.catchDex(id);
-          this.state.setFlag('gotStarter');
-          this.state.data.starter = id;
-          this.audio.sfx('caught');
-          this.audio.cry(sp.cry * 7 + 13);
-          D.say([`${sp.name} הצטרף אליך!`, 'המסע שלך מתחיל עכשיו.'],
-            { speaker: npc.name, look: npc.look });
-        }, { speaker: npc.name, look: npc.look });
-    }, { speaker: npc.name, look: npc.look });
-  }
-
-  healScene(npc) {
-    const D = this.game.dialogue;
-    D.ask(npc.lines, [{ label: 'כן, בבקשה' }, { label: 'לא, תודה', cancel: true }], (v) => {
-      if (v !== 0) return;
-      this.state.healParty();
-      this.state.data.respawn = { map: this.map.id, x: this.player.x, y: this.player.y };
-      this.audio.sfx('heal');
-      this.P.burst(W / 2, 200, 40, { color: '#8ef0b4', speed: 160, ttl: 1, size: 5, glow: true });
-      D.say(['הצוות שלך במיטבו. מסע בטוח!'], { speaker: npc.name, look: npc.look });
-    }, { speaker: npc.name, look: npc.look });
+  /** Everything the shared NPC rules need to know about this world. */
+  npcHost() {
+    return {
+      state: this.state, audio: this.audio, game: this.game,
+      mapId: this.map.id, isCave: !!this.map.def.cave,
+      removeNpc: (npc) => { this.npcs = this.npcs.filter((n) => n !== npc); },
+      respawnPoint: () => ({ map: this.map.id, x: this.player.x, y: this.player.y }),
+      onHeal: () => this.P.burst(W / 2, 200, 40,
+        { color: '#8ef0b4', speed: 160, ttl: 1, size: 5, glow: true }),
+    };
   }
 
   startTrainerBattle(npc) {
-    const t = npc.trainer;
-    let team = t.team;
-    if (t.dynamicTeam === 'rivalStarter') {
-      // The rival always picks the starter that answers yours.
-      const mine = this.state.data.starter || 'bytec';
-      const counter = { bytec: 'cookiz', pingui: 'bytec', cookiz: 'pingui' }[mine] || 'keyvi';
-      team = [{ species: 'keyvi', level: 5 }, { species: counter, level: 6 }];
-    }
-    const foeParty = team.map((m) => createCreature(m.species, m.level, { met: 'trainer' }));
     this.pendingTrainer = npc;
-    this.game.startBattle({
-      kind: 'trainer',
-      foeParty,
-      trainer: { name: npc.name, intro: t.intro, defeat: t.defeat, reward: t.reward, look: npc.look },
-      terrain: this.map.def.cave ? 'cave' : 'grass',
-    });
+    startTrainerBattle(this.npcHost(), npc);
   }
 
   /** Called by the game once a battle finishes. */
@@ -520,21 +423,7 @@ export class Overworld {
       this.fadeDir = 1;
       return;
     }
-    if (npc && result === 'win') {
-      this.state.setFlag(npc.flag);
-      const D = this.game.dialogue;
-      const lines = [npc.trainer.defeat];
-      if (npc.award) {
-        this.state.setFlag(npc.award.flag);
-        if (npc.award.item) {
-          this.state.addItem(npc.award.item, npc.award.count || 1);
-          lines.push(`קיבלת ${getItem(npc.award.item).name} ×${npc.award.count || 1}!`);
-        }
-        lines.push('סמל המבחן שלך נחקק ביומן המסע.');
-      }
-      if (npc.linesAfter) lines.push(...npc.linesAfter);
-      D.say(lines, { speaker: npc.name, look: npc.look });
-    }
+    if (npc && result === 'win') finishTrainerBattle(this.npcHost(), npc);
   }
 
   updateCamera(dt) {
